@@ -742,7 +742,9 @@ function App() {
             </button>
           </div>
         </Show>
-        <main style={{ flex: '1', display: 'flex', 'flex-direction': 'column', overflow: 'hidden' }}>
+        <main
+          style={{ flex: '1', display: 'flex', 'flex-direction': 'column', overflow: 'hidden' }}
+        >
           <TopSwitcher />
           <NewSessionBar />
           <div style={{ flex: '1', display: 'flex', overflow: 'hidden', 'min-height': '0' }}>

@@ -29,7 +29,7 @@ ClaudeDesk surfaces all of them, adds organization on top, and spawns live xterm
 ## Highlights
 
 - **History sidebar** — indexes every `.jsonl` across `~/.claude/projects` (and any extra folders you point at). Titles + short summaries come from `SESSIONS_INDEX.md`; anything missing falls back to a JSONL parser that pulls the first user message / built-in `summary` record. Results cache in SQLite so the second scan is instant.
-- **Click → resume in a terminal** — opens as a *Chat* (not a worktree task), so you can open as many as you want without the `hasDirectTask` collision. Each tile keeps its own xterm, closing one never touches the others.
+- **Click → resume in a terminal** — opens as a _Chat_ (not a worktree task), so you can open as many as you want without the `hasDirectTask` collision. Each tile keeps its own xterm, closing one never touches the others.
 - **Per-session launch options** — gear ⚙ on each row: pick agent version, add extra flags (one per line), toggle skip-permissions. Persisted in SQLite, applied every time you resume that exact session.
 - **Global terminal defaults** — Agents tab → flags + env vars (proxy, API keys, anything) merged into every new terminal. Per-session overrides win.
 - **Auto-trust folders** — global toggle adds `--dangerously-skip-permissions` and additionally watches terminal output for interactive "Trust this folder?" prompts and presses Enter automatically.
@@ -42,16 +42,16 @@ ClaudeDesk surfaces all of them, adds organization on top, and spawns live xterm
 
 ## Screenshots
 
-| History (hover to preview) | Launch options per session |
-| --- | --- |
+| History (hover to preview)                   | Launch options per session                  |
+| -------------------------------------------- | ------------------------------------------- |
 | ![](docs/screenshots/02-history-preview.png) | ![](docs/screenshots/03-launch-options.png) |
 
-| + New session bar | Chat tile + sessions rail |
-| --- | --- |
+| + New session bar                            | Chat tile + sessions rail                 |
+| -------------------------------------------- | ----------------------------------------- |
 | ![](docs/screenshots/04-new-session-bar.png) | ![](docs/screenshots/05-chat-compact.png) |
 
-| Agents & Settings |
-| --- |
+| Agents & Settings                            |
+| -------------------------------------------- |
 | ![](docs/screenshots/06-agents-settings.png) |
 
 ## Install
@@ -97,14 +97,14 @@ The Playwright suite (`e2e/smoke.spec.ts`) covers the full UX: launching the app
 
 ## Tech stack
 
-| Layer | What |
-| --- | --- |
-| Shell | [Electron 40](https://www.electronjs.org/) |
-| Renderer | [SolidJS 1.9](https://www.solidjs.com/) + Vite 7 + TypeScript 5.9 |
-| Terminal | [xterm.js 6](https://xtermjs.org/) + `@xterm/addon-fit`, `@xterm/addon-webgl` |
-| PTY | [node-pty](https://github.com/microsoft/node-pty) |
-| Storage | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (sessions db) + localStorage (UI prefs) |
-| Testing | [Vitest](https://vitest.dev/) + [Playwright](https://playwright.dev/) (Electron driver) |
+| Layer    | What                                                                                                 |
+| -------- | ---------------------------------------------------------------------------------------------------- |
+| Shell    | [Electron 40](https://www.electronjs.org/)                                                           |
+| Renderer | [SolidJS 1.9](https://www.solidjs.com/) + Vite 7 + TypeScript 5.9                                    |
+| Terminal | [xterm.js 6](https://xtermjs.org/) + `@xterm/addon-fit`, `@xterm/addon-webgl`                        |
+| PTY      | [node-pty](https://github.com/microsoft/node-pty)                                                    |
+| Storage  | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (sessions db) + localStorage (UI prefs) |
+| Testing  | [Vitest](https://vitest.dev/) + [Playwright](https://playwright.dev/) (Electron driver)              |
 
 ## Credits
 

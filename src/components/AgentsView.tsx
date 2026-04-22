@@ -14,7 +14,12 @@ import {
   stringifyFlags,
   stringifyEnv,
 } from '../store/terminal-defaults';
-import { filterState, setExtraFolders, setMinSizeKb, setMinDurationSec } from '../store/session-filters';
+import {
+  filterState,
+  setExtraFolders,
+  setMinSizeKb,
+  setMinDurationSec,
+} from '../store/session-filters';
 import { loadSessions } from '../store/sessions-history';
 import { CustomAgentEditor } from './CustomAgentEditor';
 import './AgentsView.css';
@@ -78,8 +83,8 @@ export function AgentsView() {
         <section class="agents-section">
           <h2 class="agents-section__title">CLI agents</h2>
           <p class="agents-section__desc">
-            Built-in + custom CLI agents. Each can be used to resume sessions from History or
-            start new Branches tasks. Click a session&apos;s ▶ to launch it with the agent you pick.
+            Built-in + custom CLI agents. Each can be used to resume sessions from History or start
+            new Branches tasks. Click a session&apos;s ▶ to launch it with the agent you pick.
           </p>
           <div class="agents-list">
             <For each={store.availableAgents}>
@@ -113,8 +118,8 @@ export function AgentsView() {
         <section class="agents-section agents-section--accent">
           <h2 class="agents-section__title">Auto-trust folders</h2>
           <p class="agents-section__desc">
-            Appends <code>--dangerously-skip-permissions</code> to every Claude chat so you
-            never have to confirm "Trust this folder?" manually.
+            Appends <code>--dangerously-skip-permissions</code> to every Claude chat so you never
+            have to confirm "Trust this folder?" manually.
           </p>
           <label class="launch-option">
             <input
@@ -136,9 +141,9 @@ export function AgentsView() {
         <section class="agents-section agents-section--accent">
           <h2 class="agents-section__title">Terminal defaults · applied to every chat</h2>
           <p class="agents-section__desc">
-            Flags and env vars here are appended to the args / env of every new terminal
-            (History resumes + Branches tasks). Per-session overrides (gear ⚙ on a session row)
-            win over these defaults.
+            Flags and env vars here are appended to the args / env of every new terminal (History
+            resumes + Branches tasks). Per-session overrides (gear ⚙ on a session row) win over
+            these defaults.
           </p>
 
           <div class="defaults-block">
@@ -253,11 +258,10 @@ export function AgentsView() {
             />
           </div>
           <p class="defaults-hint">
-            Note: size/duration metadata is extracted from JSONL on scan. Sessions smaller than
-            your threshold won't appear in the list but stay on disk.
+            Note: size/duration metadata is extracted from JSONL on scan. Sessions smaller than your
+            threshold won't appear in the list but stay on disk.
           </p>
         </section>
-
       </div>
     </div>
   );

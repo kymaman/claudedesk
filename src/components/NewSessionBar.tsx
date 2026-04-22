@@ -19,8 +19,7 @@ export function NewSessionBar() {
   const [skipPerms, setSkipPerms] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
 
-  const claudeAgents = () =>
-    store.availableAgents.filter((a) => a.id.startsWith('claude-'));
+  const claudeAgents = () => store.availableAgents.filter((a) => a.id.startsWith('claude-'));
 
   function reset() {
     setTitle('');
@@ -32,19 +31,15 @@ export function NewSessionBar() {
   async function launch(e?: Event) {
     e?.preventDefault();
     if (busy()) return;
-    const cwdValue = cwd().trim();
-    if (!cwdValue) {
-      window.alert('Working directory is required.');
-      return;
-    }
     setBusy(true);
     try {
       const extraFlags = flags()
         .split(/\r?\n|\s+/)
         .map((s) => s.trim())
         .filter(Boolean);
+      // Empty cwd → pty falls back to the user's home dir (see electron/ipc/pty.ts).
       openFreshChat({
-        cwd: cwdValue,
+        cwd: cwd().trim(),
         agentId: agentId(),
         extraFlags,
         skipPermissions: skipPerms(),
@@ -71,7 +66,7 @@ export function NewSessionBar() {
             />
             <input
               class="nsb-input nsb-input--cwd"
-              placeholder="cwd — absolute path (required)"
+              placeholder="cwd — absolute path (optional, defaults to home)"
               value={cwd()}
               onInput={(e) => setCwd(e.currentTarget.value)}
               spellcheck={false}

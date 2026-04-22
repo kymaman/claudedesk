@@ -55,10 +55,10 @@
 }
 
 .agents-section--accent {
-  border-left: 3px solid var(--accent, #FF3E3E);
+  border-left: 3px solid var(--accent, #ff3e3e);
   padding-left: 14px;
   margin-left: -14px;
-  background: color-mix(in srgb, var(--accent, #FF3E3E) 4%, transparent);
+  background: color-mix(in srgb, var(--accent, #ff3e3e) 4%, transparent);
   padding-top: 10px;
   padding-right: 14px;
   padding-bottom: 10px;
@@ -127,13 +127,13 @@
 }
 
 .agent-card__status.is-ok {
-  background: color-mix(in srgb, #00C16A 20%, transparent);
-  color: #00C16A;
+  background: color-mix(in srgb, #00c16a 20%, transparent);
+  color: #00c16a;
 }
 
 .agent-card__status.is-missing {
-  background: color-mix(in srgb, var(--accent, #FF3E3E) 15%, transparent);
-  color: var(--accent, #FF3E3E);
+  background: color-mix(in srgb, var(--accent, #ff3e3e) 15%, transparent);
+  color: var(--accent, #ff3e3e);
 }
 
 .agent-card__cmd {
@@ -214,7 +214,7 @@
 }
 
 .defaults-textarea:focus {
-  border-color: var(--accent, #FF3E3E);
+  border-color: var(--accent, #ff3e3e);
 }
 
 .defaults-actions {
@@ -243,5 +243,5 @@
 
 .defaults-flash {
   font-size: 11px;
-  color: #00C16A;
+  color: #00c16a;
 }

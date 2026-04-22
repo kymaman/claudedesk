@@ -154,7 +154,11 @@ test('Right-click custom folder opens menu with Rename + Delete', async () => {
   // Create folder via direct IPC + force a UI reload so the row appears.
   const folderName = `rc-test-${Date.now().toString().slice(-5)}`;
   await window.evaluate(async (name) => {
-    const el = (window as unknown as { electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } } }).electron;
+    const el = (
+      window as unknown as {
+        electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } };
+      }
+    ).electron;
     if (!el) throw new Error('electron bridge missing');
     await el.ipcRenderer.invoke('create_folder', { name });
   }, folderName);
@@ -167,9 +171,7 @@ test('Right-click custom folder opens menu with Rename + Delete', async () => {
   const menu = window.locator('.folder-row__menu').first();
   await expect(menu).toBeVisible();
   await expect(menu.locator('.folder-row__menu-item', { hasText: 'Rename' })).toBeVisible();
-  await expect(
-    menu.locator('.folder-row__menu-item--danger', { hasText: 'Delete' }),
-  ).toBeVisible();
+  await expect(menu.locator('.folder-row__menu-item--danger', { hasText: 'Delete' })).toBeVisible();
   await menu.locator('.folder-row__menu-item', { hasText: 'Cancel' }).click();
 });
 
@@ -217,12 +219,15 @@ test('Clicking ▶ on a session opens a wide chat tile next to the sessions list
       tileCount: document.querySelectorAll('.chat-tile').length,
     };
   });
-  console.log('Layout boxes:', JSON.stringify(parentBoxes, null, 2));
+  console.warn('Layout boxes:', JSON.stringify(parentBoxes, null, 2));
 
   // Side-by-side layout: with folders 160px + sessions 260px = 420px of rail,
   // on a 1335-wide window the tile gets ~915px. Guard against the 15px /
   // 582px regressions — require at least 600px wide and 300px tall.
-  expect(box.width, `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`).toBeGreaterThan(600);
+  expect(
+    box.width,
+    `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`,
+  ).toBeGreaterThan(600);
   expect(box.height, `tile.height=${box.height}`).toBeGreaterThan(300);
 
   // Clean up
@@ -262,7 +267,9 @@ test('Right-click session row opens delete menu with both delete options', async
   await firstRow.click({ button: 'right' });
   const menu = window.locator('.session-item__menu').first();
   await expect(menu).toBeVisible();
-  await expect(menu.locator('.session-item__menu-item', { hasText: 'Delete from view' })).toBeVisible();
+  await expect(
+    menu.locator('.session-item__menu-item', { hasText: 'Delete from view' }),
+  ).toBeVisible();
   await expect(
     menu.locator('.session-item__menu-item--danger', { hasText: 'Delete permanently' }),
   ).toBeVisible();
@@ -287,7 +294,11 @@ test('Create folder via inline input persists in folders pane', async () => {
   // Verify IPC channel works directly first — this pinpoints whether the
   // failure is in the UI handler or in the IPC/SQLite layer.
   const directResult = await window.evaluate(async (name) => {
-    const el = (window as unknown as { electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } } }).electron;
+    const el = (
+      window as unknown as {
+        electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } };
+      }
+    ).electron;
     if (!el) return { ok: false, err: 'window.electron missing' };
     try {
       const folder = await el.ipcRenderer.invoke('create_folder', { name });
@@ -310,7 +321,7 @@ test('Create folder via inline input persists in folders pane', async () => {
   });
   await window.waitForTimeout(800);
 
-  await expect(
-    window.locator('.folder-row', { hasText: testFolderName }),
-  ).toBeVisible({ timeout: 5_000 });
+  await expect(window.locator('.folder-row', { hasText: testFolderName })).toBeVisible({
+    timeout: 5_000,
+  });
 });

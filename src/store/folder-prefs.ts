@@ -1,3 +1,4 @@
+/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 
 const KEY = 'claudedesk.folderPrefs';

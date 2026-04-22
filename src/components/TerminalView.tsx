@@ -553,8 +553,7 @@ export function TerminalView(props: TerminalViewProps) {
     // Auto-trust folders: when the global App-preferences toggle is on, and
     // the command is a Claude binary, auto-append --dangerously-skip-permissions
     // so the user isn't prompted "Trust this folder?" on every resume.
-    const commandLooksClaude =
-      /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(props.command ?? '');
+    const commandLooksClaude = /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(props.command ?? '');
     if (store.autoTrustFolders && commandLooksClaude) {
       if (!mergedArgs.includes('--dangerously-skip-permissions')) {
         mergedArgs.push('--dangerously-skip-permissions');
@@ -572,6 +571,7 @@ export function TerminalView(props: TerminalViewProps) {
     ];
     const TRUST_EXCLUSIONS =
       /\b(delet|remov|credential|secret|password|key|token|destro|format|drop)/i;
+    // eslint-disable-next-line no-control-regex
     const ANSI_STRIP = /\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]/g;
     let trustTail = '';
     let lastTrustSendAt = 0;

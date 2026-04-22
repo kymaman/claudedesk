@@ -1,3 +1,4 @@
+/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 /**
  * terminal-defaults.ts
  * Global per-launch defaults applied to every new Claude terminal:
@@ -74,9 +75,7 @@ export function setTerminalEnv(env: Record<string, string>): void {
 
 export function setTerminalCwd(cwd: string | undefined): void {
   const curr = terminalDefaults();
-  const next: TerminalDefaults = cwd
-    ? { ...curr, cwd }
-    : { flags: curr.flags, env: curr.env };
+  const next: TerminalDefaults = cwd ? { ...curr, cwd } : { flags: curr.flags, env: curr.env };
   _setTerminalDefaults(next);
   persist(next);
 }

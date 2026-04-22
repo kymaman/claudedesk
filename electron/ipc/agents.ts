@@ -20,19 +20,9 @@ import { IS_WINDOWS } from '../platform.js';
 // directory so the app ships with working defaults for the two common install
 // flavours — npm-global-to-.local and winget. Users with a different layout
 // can override via Agents view → Custom agents.
-const WIN_CLAUDE_47 = IS_WINDOWS
-  ? path.join(homedir(), '.local', 'bin', 'claude.exe')
-  : 'claude';
+const WIN_CLAUDE_47 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
 const WIN_CLAUDE_46 = IS_WINDOWS
-  ? path.join(
-      homedir(),
-      'AppData',
-      'Local',
-      'Microsoft',
-      'WinGet',
-      'Links',
-      'claude.exe',
-    )
+  ? path.join(homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe')
   : 'claude';
 
 const DEFAULT_AGENTS: AgentDef[] = [

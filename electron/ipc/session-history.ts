@@ -71,6 +71,7 @@ function getDb(): Database.Database {
       mtime_ms    INTEGER NOT NULL,
       title       TEXT,
       summary     TEXT,
+      cwd         TEXT,
       cached_at   INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_summaries_filepath ON session_summaries(file_path);
@@ -92,13 +93,17 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_folder_map_folder ON session_folder_map(folder_id);
     CREATE INDEX IF NOT EXISTS idx_folder_map_session ON session_folder_map(session_id);
   `);
-  // Upgrade path: add pinned column if an older DB exists without it.
+  // Upgrade path: additive ALTERs for older DBs.
   try {
-    const cols = _db
-      .prepare<[], { name: string }>("PRAGMA table_info('folders')")
-      .all();
-    if (!cols.some((c) => c.name === 'pinned')) {
+    const folderCols = _db.prepare<[], { name: string }>("PRAGMA table_info('folders')").all();
+    if (!folderCols.some((c) => c.name === 'pinned')) {
       _db.exec('ALTER TABLE folders ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    }
+    const summaryCols = _db
+      .prepare<[], { name: string }>("PRAGMA table_info('session_summaries')")
+      .all();
+    if (!summaryCols.some((c) => c.name === 'cwd')) {
+      _db.exec('ALTER TABLE session_summaries ADD COLUMN cwd TEXT');
     }
   } catch {
     /* best-effort migration */
@@ -127,9 +132,7 @@ export function getLaunchSettings(sessionId: string): LaunchSettings | null {
     .prepare<
       [string],
       { agent_id: string; extra_flags_json: string; skip_permissions: number }
-    >(
-      'SELECT agent_id, extra_flags_json, skip_permissions FROM session_launch_settings WHERE session_id = ?',
-    )
+    >('SELECT agent_id, extra_flags_json, skip_permissions FROM session_launch_settings WHERE session_id = ?')
     .get(sessionId);
   if (!row) return null;
   let flags: string[] = [];
@@ -158,15 +161,17 @@ export function setLaunchSettings(sessionId: string, s: LaunchSettings): void {
 interface CachedSummary {
   title: string | null;
   summary: string | null;
+  cwd: string | null;
   mtime_ms: number;
 }
 
 function getCachedSummary(sessionId: string): CachedSummary | null {
   const db = getDb();
   const row = db
-    .prepare<[string], { title: string | null; summary: string | null; mtime_ms: number }>(
-      'SELECT title, summary, mtime_ms FROM session_summaries WHERE session_id = ?',
-    )
+    .prepare<
+      [string],
+      { title: string | null; summary: string | null; cwd: string | null; mtime_ms: number }
+    >('SELECT title, summary, cwd, mtime_ms FROM session_summaries WHERE session_id = ?')
     .get(sessionId);
   return row ?? null;
 }
@@ -177,11 +182,12 @@ function setCachedSummary(
   mtimeMs: number,
   title: string | null,
   summary: string | null,
+  cwd: string | null,
 ): void {
   const db = getDb();
   db.prepare(
-    'INSERT OR REPLACE INTO session_summaries (session_id, file_path, mtime_ms, title, summary, cached_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(sessionId, filePath, mtimeMs, title, summary, Date.now());
+    'INSERT OR REPLACE INTO session_summaries (session_id, file_path, mtime_ms, title, summary, cwd, cached_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(sessionId, filePath, mtimeMs, title, summary, cwd, Date.now());
 }
 
 export function getAlias(sessionId: string): string | null {
@@ -213,9 +219,7 @@ export function listFolders(): FolderItem[] {
     .prepare<
       [],
       { id: string; name: string; color: string | null; position: number; pinned: number }
-    >(
-      'SELECT id, name, color, position, pinned FROM folders ORDER BY pinned DESC, position ASC, name ASC',
-    )
+    >('SELECT id, name, color, position, pinned FROM folders ORDER BY pinned DESC, position ASC, name ASC')
     .all();
   return rows.map((r) => ({
     id: r.id,
@@ -236,8 +240,9 @@ export function createFolder(args: { name: string; color?: string }): FolderItem
   const id = cryptoRandomId();
   const maxPos =
     (
-      db.prepare<[], { maxPos: number | null }>('SELECT MAX(position) as maxPos FROM folders').get() ??
-      { maxPos: -1 }
+      db
+        .prepare<[], { maxPos: number | null }>('SELECT MAX(position) as maxPos FROM folders')
+        .get() ?? { maxPos: -1 }
     ).maxPos ?? -1;
   const position = (maxPos ?? -1) + 1;
   const color = (args.color ?? '').trim() || null;
@@ -307,9 +312,10 @@ export function addSessionToFolder(args: { sessionId: string; folderId: string }
 
 export function removeSessionFromFolder(args: { sessionId: string; folderId: string }): void {
   const db = getDb();
-  db.prepare(
-    'DELETE FROM session_folder_map WHERE session_id = ? AND folder_id = ?',
-  ).run(args.sessionId, args.folderId);
+  db.prepare('DELETE FROM session_folder_map WHERE session_id = ? AND folder_id = ?').run(
+    args.sessionId,
+    args.folderId,
+  );
 }
 
 function getFolderIdsForSessions(sessionIds: string[]): Map<string, string[]> {
@@ -318,9 +324,10 @@ function getFolderIdsForSessions(sessionIds: string[]): Map<string, string[]> {
   const db = getDb();
   const placeholders = sessionIds.map(() => '?').join(',');
   const rows = db
-    .prepare<string[], { session_id: string; folder_id: string }>(
-      `SELECT session_id, folder_id FROM session_folder_map WHERE session_id IN (${placeholders})`,
-    )
+    .prepare<
+      string[],
+      { session_id: string; folder_id: string }
+    >(`SELECT session_id, folder_id FROM session_folder_map WHERE session_id IN (${placeholders})`)
     .all(...sessionIds);
   for (const r of rows) {
     const arr = map.get(r.session_id) ?? [];
@@ -504,14 +511,16 @@ function extractUserText(content: unknown): string | null {
 interface ExtractedSummary {
   title: string | null;
   summary: string | null;
+  cwd: string | null;
 }
 
 async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
   return new Promise((resolve) => {
-    const result: ExtractedSummary = { title: null, summary: null };
+    const result: ExtractedSummary = { title: null, summary: null, cwd: null };
     let count = 0;
     let summaryFromIndex: string | null = null;
     let firstUserText: string | null = null;
+    let cwd: string | null = null;
     let stream: fs.ReadStream;
     try {
       stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
@@ -531,6 +540,7 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
         result.title = firstUserText.slice(0, 80);
         result.summary = firstUserText.slice(0, 240);
       }
+      result.cwd = cwd;
       resolve(result);
     };
 
@@ -545,20 +555,27 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
         const obj = JSON.parse(line) as {
           type?: string;
           summary?: string;
+          cwd?: unknown;
           message?: { role?: string; content?: unknown };
           isMeta?: boolean;
         };
+        if (!cwd && typeof obj.cwd === 'string' && obj.cwd.trim()) {
+          cwd = obj.cwd;
+        }
         // Claude Code periodically writes {type:"summary", summary:"..."} records
         if (obj.type === 'summary' && typeof obj.summary === 'string') {
           summaryFromIndex = obj.summary.trim();
-          finish();
-          return;
+          // Keep scanning a few more lines if cwd still missing
+          if (cwd || count > 8) {
+            finish();
+            return;
+          }
         }
         if (obj.type === 'user' && !obj.isMeta && obj.message?.role === 'user') {
           const text = extractUserText(obj.message.content);
           if (text && !firstUserText) {
             firstUserText = text;
-            if (count > 4) {
+            if (cwd && count > 4) {
               finish();
               return;
             }
@@ -610,61 +627,66 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
 
   // Resolve each session's display title + description.
   // Priority: user alias → SESSIONS_INDEX.md → cached JSONL extract → live JSONL parse.
-  const items: SessionItem[] = await mapPool(
-    unique,
-    JSONL_PARSE_CONCURRENCY,
-    async (raw) => {
-      const uuid8 = raw.sessionId.slice(0, 8);
-      const indexEntry = index.get(uuid8);
-      const alias = getAlias(raw.sessionId);
-      const date = indexEntry?.date ?? raw.mtime.toISOString().slice(0, 10);
+  const items: SessionItem[] = await mapPool(unique, JSONL_PARSE_CONCURRENCY, async (raw) => {
+    const uuid8 = raw.sessionId.slice(0, 8);
+    const indexEntry = index.get(uuid8);
+    const alias = getAlias(raw.sessionId);
+    const date = indexEntry?.date ?? raw.mtime.toISOString().slice(0, 10);
 
-      const folderIds = folderIdsMap.get(raw.sessionId) ?? [];
+    const folderIds = folderIdsMap.get(raw.sessionId) ?? [];
 
-      // When SESSIONS_INDEX.md covers the session, trust its title+description.
-      if (indexEntry) {
-        const title = alias ?? indexEntry.title;
-        return {
-          sessionId: raw.sessionId,
-          filePath: raw.filePath,
-          projectPath: raw.projectPath,
-          title,
-          date,
-          folderIds,
-          ...(indexEntry.description ? { description: indexEntry.description } : {}),
-        };
-      }
+    // Always try to recover the real cwd from the JSONL (folder-name decoding
+    // is lossy — dashes in path segments can't be distinguished from separators).
+    // Cache by mtime so we only pay the read once.
+    const mtimeMs = raw.mtime.getTime();
+    let cached = getCachedSummary(raw.sessionId);
+    if (!cached || cached.mtime_ms !== mtimeMs) {
+      const extracted = await parseJsonlSummary(raw.filePath);
+      setCachedSummary(
+        raw.sessionId,
+        raw.filePath,
+        mtimeMs,
+        extracted.title,
+        extracted.summary,
+        extracted.cwd,
+      );
+      cached = {
+        title: extracted.title,
+        summary: extracted.summary,
+        cwd: extracted.cwd,
+        mtime_ms: mtimeMs,
+      };
+    }
 
-      // Otherwise, pull a fallback title+summary out of the JSONL. Cache by mtime.
-      const mtimeMs = raw.mtime.getTime();
-      let cached = getCachedSummary(raw.sessionId);
-      if (!cached || cached.mtime_ms !== mtimeMs) {
-        const extracted = await parseJsonlSummary(raw.filePath);
-        setCachedSummary(
-          raw.sessionId,
-          raw.filePath,
-          mtimeMs,
-          extracted.title,
-          extracted.summary,
-        );
-        cached = { title: extracted.title, summary: extracted.summary, mtime_ms: mtimeMs };
-      }
+    const projectPath = cached.cwd ?? raw.projectPath;
 
-      const title =
-        alias ?? cached.title ?? `session ${raw.sessionId.slice(0, 8)}`;
-      const description = cached.summary ?? undefined;
-
+    // When SESSIONS_INDEX.md covers the session, trust its title+description.
+    if (indexEntry) {
+      const title = alias ?? indexEntry.title;
       return {
         sessionId: raw.sessionId,
         filePath: raw.filePath,
-        projectPath: raw.projectPath,
+        projectPath,
         title,
         date,
         folderIds,
-        ...(description ? { description } : {}),
+        ...(indexEntry.description ? { description: indexEntry.description } : {}),
       };
-    },
-  );
+    }
+
+    const title = alias ?? cached.title ?? `session ${raw.sessionId.slice(0, 8)}`;
+    const description = cached.summary ?? undefined;
+
+    return {
+      sessionId: raw.sessionId,
+      filePath: raw.filePath,
+      projectPath,
+      title,
+      date,
+      folderIds,
+      ...(description ? { description } : {}),
+    };
+  });
 
   return items;
 }
@@ -706,3 +728,12 @@ export async function getSessionPreview(filePath: string): Promise<SessionPrevie
     rl.on('error', reject);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Test-only exports. Not part of the public IPC surface.
+// ---------------------------------------------------------------------------
+
+export const __test = {
+  parseJsonlSummary,
+  decodeProjectPath,
+};

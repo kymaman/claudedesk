@@ -1,3 +1,4 @@
+/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 /**
  * session-hide.ts
  * Client-side list of session ids the user chose to hide from History.

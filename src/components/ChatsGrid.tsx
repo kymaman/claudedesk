@@ -35,8 +35,7 @@ export function ChatsGrid() {
       <Show when={openChats().length === 0}>
         <div class="chats-grid__empty">
           Click ▶ on a session in History to open a chat here. Up to
-          {' ' + MAX_CHATS_PER_WINDOW} chats fit in this window; after that a new
-          window opens.
+          {' ' + MAX_CHATS_PER_WINDOW} chats fit in this window; after that a new window opens.
         </div>
       </Show>
       <Show when={openChats().length > 0}>

@@ -1,3 +1,4 @@
+/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 /**
  * sessions-history.ts
  * SolidJS signals for the Claude Code sessions history panel.
@@ -53,9 +54,7 @@ type RootSig<T> = [Accessor<T>, Setter<T>];
 const [_sessions, _setSessions] = createRoot<RootSig<SessionItem[]>>(() =>
   createSignal<SessionItem[]>([]),
 );
-const [_searchQuery, _setSearchQuery] = createRoot<RootSig<string>>(() =>
-  createSignal<string>(''),
-);
+const [_searchQuery, _setSearchQuery] = createRoot<RootSig<string>>(() => createSignal<string>(''));
 const [_sessionsLoading, _setSessionsLoading] = createRoot<RootSig<boolean>>(() =>
   createSignal<boolean>(false),
 );
@@ -96,11 +95,7 @@ export function smartProjectGroups(): { projectPath: string; basename: string; c
   }
   const out: { projectPath: string; basename: string; count: number }[] = [];
   for (const [projectPath, count] of counts) {
-    const basename =
-      projectPath
-        .split(/[\\/]/)
-        .filter(Boolean)
-        .pop() ?? projectPath;
+    const basename = projectPath.split(/[\\/]/).filter(Boolean).pop() ?? projectPath;
     out.push({ projectPath, basename, count });
   }
   out.sort((a, b) => b.count - a.count);
@@ -130,10 +125,12 @@ export async function loadSessions(extraFolders?: string[]): Promise<void> {
 }
 
 export async function renameSessionLocal(sessionId: string, alias: string): Promise<void> {
-  await invoke<void>(IPC.RenameClaudeSession, { sessionId, alias });
+  await invoke<undefined>(IPC.RenameClaudeSession, { sessionId, alias });
   // Optimistically update local title
   setSessions((prev) =>
-    prev.map((s) => (s.sessionId === sessionId ? { ...s, title: alias || s.sessionId.slice(0, 16) } : s)),
+    prev.map((s) =>
+      s.sessionId === sessionId ? { ...s, title: alias || s.sessionId.slice(0, 16) } : s,
+    ),
   );
 }
 
@@ -181,9 +178,7 @@ export function filteredSessions(): SessionItem[] {
       break;
     case 'project':
       list.sort(
-        (a, b) =>
-          a.projectPath.localeCompare(b.projectPath) ||
-          b.date.localeCompare(a.date),
+        (a, b) => a.projectPath.localeCompare(b.projectPath) || b.date.localeCompare(a.date),
       );
       break;
     case 'title':
@@ -222,7 +217,7 @@ export async function createFolderAction(name: string, color?: string): Promise<
 
 export async function renameFolderAction(id: string, name: string): Promise<void> {
   try {
-    await invoke<void>(IPC.RenameFolder, { id, name });
+    await invoke<undefined>(IPC.RenameFolder, { id, name });
     _setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
   } catch (err) {
     console.warn('[sessions-history] renameFolder failed:', err);
@@ -231,7 +226,7 @@ export async function renameFolderAction(id: string, name: string): Promise<void
 
 export async function deleteFolderAction(id: string): Promise<void> {
   try {
-    await invoke<void>(IPC.DeleteFolder, { id });
+    await invoke<undefined>(IPC.DeleteFolder, { id });
     _setFolders((prev) => prev.filter((f) => f.id !== id));
     // Remove membership from all sessions client-side
     setSessions((prev) =>
@@ -247,7 +242,7 @@ export async function deleteFolderAction(id: string): Promise<void> {
 
 export async function addSessionToFolderAction(sessionId: string, folderId: string): Promise<void> {
   try {
-    await invoke<void>(IPC.AddSessionToFolder, { sessionId, folderId });
+    await invoke<undefined>(IPC.AddSessionToFolder, { sessionId, folderId });
     setSessions((prev) =>
       prev.map((s) =>
         s.sessionId === sessionId && !s.folderIds.includes(folderId)
@@ -265,7 +260,7 @@ export async function removeSessionFromFolderAction(
   folderId: string,
 ): Promise<void> {
   try {
-    await invoke<void>(IPC.RemoveSessionFromFolder, { sessionId, folderId });
+    await invoke<undefined>(IPC.RemoveSessionFromFolder, { sessionId, folderId });
     setSessions((prev) =>
       prev.map((s) =>
         s.sessionId === sessionId
@@ -280,7 +275,7 @@ export async function removeSessionFromFolderAction(
 
 export async function pinFolderAction(id: string, pinned: boolean): Promise<void> {
   try {
-    await invoke<void>(IPC.PinFolder, { id, pinned });
+    await invoke<undefined>(IPC.PinFolder, { id, pinned });
     _setFolders((prev) => {
       const next = prev.map((f) => (f.id === id ? { ...f, pinned } : f));
       // Re-sort: pinned first, then by position/name
@@ -310,12 +305,13 @@ export async function resumeSession(
 ): Promise<string | null> {
   try {
     // 1. Find or create the project that owns the session's cwd
-    let project = store.projects.find((p) => p.path === session.projectPath);
+    const project = store.projects.find((p) => p.path === session.projectPath);
     let projectId: string;
     if (project) {
       projectId = project.id;
     } else {
-      const basename = session.projectPath.split(/[\\/]/).filter(Boolean).pop() ?? session.projectPath;
+      const basename =
+        session.projectPath.split(/[\\/]/).filter(Boolean).pop() ?? session.projectPath;
       projectId = addProject(basename, session.projectPath);
     }
 

@@ -37,7 +37,9 @@
   letter-spacing: 0.02em;
   border-radius: 6px;
   line-height: 1.4;
-  transition: background 120ms, color 120ms;
+  transition:
+    background 120ms,
+    color 120ms;
 }
 
 .ts-nav:hover {
@@ -99,9 +101,9 @@
 }
 
 .ts-chip--active {
-  background: var(--accent, #FF3E3E);
+  background: var(--accent, #ff3e3e);
   color: var(--bg);
-  border-color: var(--accent, #FF3E3E);
+  border-color: var(--accent, #ff3e3e);
 }
 
 .ts-chip--add {

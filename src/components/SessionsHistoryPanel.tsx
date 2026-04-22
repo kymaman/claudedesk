@@ -163,146 +163,150 @@ export function SessionsHistoryPanel(props: Props) {
         class={`sessions-panel__body${compact() ? ' sessions-panel__body--compact' : ''}${foldersCollapsed() ? ' sessions-panel__body--folders-hidden' : ''}`}
       >
         <Show when={!foldersCollapsed()}>
-        <aside class="folders-pane">
-          <div class="folders-pane__head">
-            <span class="folders-pane__label">Folders</span>
-            <button
-              class="folders-pane__collapse"
-              onClick={() => setFoldersCollapsed(true)}
-              title="Hide folders"
-            >
-              ‹
-            </button>
-            <button
-              class="folders-pane__add"
-              onClick={beginCreateFolder}
-              title="Create new folder"
-              disabled={creatingFolder()}
-            >
-              +
-            </button>
-          </div>
-
-          <Show when={creatingFolder()}>
-            <div class="folder-create">
-              <input
-                ref={newFolderInputRef}
-                class="folder-create__input"
-                value={newFolderName()}
-                placeholder="Folder name…"
-                onInput={(e) => setNewFolderName(e.currentTarget.value)}
-                onBlur={() => void commitCreateFolder()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void commitCreateFolder();
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelCreateFolder();
-                  }
-                }}
-              />
+          <aside class="folders-pane">
+            <div class="folders-pane__head">
+              <span class="folders-pane__label">Folders</span>
+              <button
+                class="folders-pane__collapse"
+                onClick={() => setFoldersCollapsed(true)}
+                title="Hide folders"
+              >
+                ‹
+              </button>
+              <button
+                class="folders-pane__add"
+                onClick={beginCreateFolder}
+                title="Create new folder"
+                disabled={creatingFolder()}
+              >
+                +
+              </button>
             </div>
-          </Show>
 
-          <FolderRow
-            label="All sessions"
-            active={activeFolderId() === null && activeProjectPath() === null}
-            onClick={() => {
-              setActiveFolderId(null);
-              setActiveProjectPath(null);
-            }}
-            count={sessions().length}
-            highlight={false}
-          />
+            <Show when={creatingFolder()}>
+              <div class="folder-create">
+                <input
+                  ref={newFolderInputRef}
+                  class="folder-create__input"
+                  value={newFolderName()}
+                  placeholder="Folder name…"
+                  onInput={(e) => setNewFolderName(e.currentTarget.value)}
+                  onBlur={() => void commitCreateFolder()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void commitCreateFolder();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelCreateFolder();
+                    }
+                  }}
+                />
+              </div>
+            </Show>
 
-          <Show when={folders().length > 0}>
-            <div class="folders-pane__section-title">My folders</div>
-          </Show>
-          <For
-            each={folders().filter((f) => {
-              if (!hideEmptyFolders()) return true;
-              const count = sessions().filter((s) => s.folderIds.includes(f.id)).length;
-              return count > 0 || f.pinned;
-            })}
-          >
-            {(folder) => (
-              <FolderRowCustom
-                folder={folder}
-                active={activeFolderId() === folder.id}
-                highlight={draggedFolderTarget() === folder.id}
-                count={sessions().filter((s) => s.folderIds.includes(folder.id)).length}
-                onClick={() => {
-                  setActiveFolderId(folder.id);
-                  setActiveProjectPath(null);
-                }}
-                onDragEnter={() => setDraggedFolderTarget(folder.id)}
-                onDragLeave={() => {
-                  if (draggedFolderTarget() === folder.id) setDraggedFolderTarget(null);
-                }}
-                onDrop={async (sessionId) => {
-                  setDraggedFolderTarget(null);
-                  await addSessionToFolderAction(sessionId, folder.id);
-                }}
-                onRename={async (newName) => {
-                  await renameFolderAction(folder.id, newName);
-                }}
-                onDelete={async () => {
-                  if (window.confirm(`Delete folder "${folder.name}"? Sessions are not deleted.`)) {
-                    await deleteFolderAction(folder.id);
-                  }
-                }}
-                onPin={async () => {
-                  await pinFolderAction(folder.id, !folder.pinned);
-                }}
-              />
-            )}
-          </For>
-
-          <div class="folders-pane__footer">
-            <button
-              class={`folders-pane__footer-btn ${hideEmptyFolders() ? 'is-active' : ''}`}
-              onClick={() => setHideEmptyFolders(!hideEmptyFolders())}
-              title="Hide folders that contain zero sessions (pinned folders stay visible)"
-            >
-              {hideEmptyFolders() ? '☑' : '☐'} Hide empty
-            </button>
-          </div>
-
-          <Show when={smartProjectGroups().length > 0}>
-            <div class="folders-pane__section-title">By project</div>
-            <For each={smartProjectGroups()}>
-              {(group) => {
-                const isHidden = () => filterState().hiddenProjects.includes(group.projectPath);
-                return (
-                  <div class="folder-row-smart-wrap">
-                    <button
-                      class={`folder-row folder-row--smart${activeProjectPath() === group.projectPath ? ' folder-row--active' : ''}${isHidden() ? ' folder-row--hidden' : ''}`}
-                      onClick={() => {
-                        setActiveProjectPath(group.projectPath);
-                        setActiveFolderId(null);
-                      }}
-                      title={group.projectPath + (isHidden() ? ' (hidden from All sessions)' : '')}
-                    >
-                      <span class="folder-row__label">{group.basename}</span>
-                      <span class="folder-row__count">{group.count}</span>
-                    </button>
-                    <button
-                      class="folder-row-smart-wrap__toggle"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleHiddenProject(group.projectPath);
-                      }}
-                      title={isHidden() ? 'Show in All sessions' : 'Hide from All sessions'}
-                    >
-                      {isHidden() ? '◇' : '◆'}
-                    </button>
-                  </div>
-                );
+            <FolderRow
+              label="All sessions"
+              active={activeFolderId() === null && activeProjectPath() === null}
+              onClick={() => {
+                setActiveFolderId(null);
+                setActiveProjectPath(null);
               }}
+              count={sessions().length}
+              highlight={false}
+            />
+
+            <Show when={folders().length > 0}>
+              <div class="folders-pane__section-title">My folders</div>
+            </Show>
+            <For
+              each={folders().filter((f) => {
+                if (!hideEmptyFolders()) return true;
+                const count = sessions().filter((s) => s.folderIds.includes(f.id)).length;
+                return count > 0 || f.pinned;
+              })}
+            >
+              {(folder) => (
+                <FolderRowCustom
+                  folder={folder}
+                  active={activeFolderId() === folder.id}
+                  highlight={draggedFolderTarget() === folder.id}
+                  count={sessions().filter((s) => s.folderIds.includes(folder.id)).length}
+                  onClick={() => {
+                    setActiveFolderId(folder.id);
+                    setActiveProjectPath(null);
+                  }}
+                  onDragEnter={() => setDraggedFolderTarget(folder.id)}
+                  onDragLeave={() => {
+                    if (draggedFolderTarget() === folder.id) setDraggedFolderTarget(null);
+                  }}
+                  onDrop={(sessionId) => {
+                    setDraggedFolderTarget(null);
+                    void addSessionToFolderAction(sessionId, folder.id);
+                  }}
+                  onRename={(newName) => {
+                    void renameFolderAction(folder.id, newName);
+                  }}
+                  onDelete={() => {
+                    if (
+                      window.confirm(`Delete folder "${folder.name}"? Sessions are not deleted.`)
+                    ) {
+                      void deleteFolderAction(folder.id);
+                    }
+                  }}
+                  onPin={() => {
+                    void pinFolderAction(folder.id, !folder.pinned);
+                  }}
+                />
+              )}
             </For>
-          </Show>
-        </aside>
+
+            <div class="folders-pane__footer">
+              <button
+                class={`folders-pane__footer-btn ${hideEmptyFolders() ? 'is-active' : ''}`}
+                onClick={() => setHideEmptyFolders(!hideEmptyFolders())}
+                title="Hide folders that contain zero sessions (pinned folders stay visible)"
+              >
+                {hideEmptyFolders() ? '☑' : '☐'} Hide empty
+              </button>
+            </div>
+
+            <Show when={smartProjectGroups().length > 0}>
+              <div class="folders-pane__section-title">By project</div>
+              <For each={smartProjectGroups()}>
+                {(group) => {
+                  const isHidden = () => filterState().hiddenProjects.includes(group.projectPath);
+                  return (
+                    <div class="folder-row-smart-wrap">
+                      <button
+                        class={`folder-row folder-row--smart${activeProjectPath() === group.projectPath ? ' folder-row--active' : ''}${isHidden() ? ' folder-row--hidden' : ''}`}
+                        onClick={() => {
+                          setActiveProjectPath(group.projectPath);
+                          setActiveFolderId(null);
+                        }}
+                        title={
+                          group.projectPath + (isHidden() ? ' (hidden from All sessions)' : '')
+                        }
+                      >
+                        <span class="folder-row__label">{group.basename}</span>
+                        <span class="folder-row__count">{group.count}</span>
+                      </button>
+                      <button
+                        class="folder-row-smart-wrap__toggle"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleHiddenProject(group.projectPath);
+                        }}
+                        title={isHidden() ? 'Show in All sessions' : 'Hide from All sessions'}
+                      >
+                        {isHidden() ? '◇' : '◆'}
+                      </button>
+                    </div>
+                  );
+                }}
+              </For>
+            </Show>
+          </aside>
         </Show>
         <Show when={foldersCollapsed()}>
           <button
@@ -339,10 +343,7 @@ export function SessionsHistoryPanel(props: Props) {
           </Show>
         </div>
 
-        <Show
-          when={compact()}
-          fallback={<PreviewPane session={hoveredSession()} />}
-        >
+        <Show when={compact()} fallback={<PreviewPane session={hoveredSession()} />}>
           <div class="sessions-panel__chats">
             <ChatsGrid />
           </div>
@@ -366,7 +367,7 @@ function FolderRow(props: {
   return (
     <button
       class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
-      onClick={props.onClick}
+      onClick={() => props.onClick()}
     >
       <span class="folder-row__label">{props.label}</span>
       <Show when={typeof props.count === 'number'}>
@@ -384,10 +385,10 @@ function FolderRowCustom(props: {
   onClick: () => void;
   onDragEnter: () => void;
   onDragLeave: () => void;
-  onDrop: (sessionId: string) => Promise<void>;
-  onRename: (newName: string) => Promise<void>;
-  onDelete: () => Promise<void>;
-  onPin: () => Promise<void>;
+  onDrop: (sessionId: string) => void;
+  onRename: (newName: string) => void;
+  onDelete: () => void;
+  onPin: () => void;
 }) {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal('');
@@ -424,24 +425,24 @@ function FolderRowCustom(props: {
     });
   }
 
-  async function commitRename() {
+  function commitRename() {
     const value = draft().trim();
     setEditing(false);
     if (value && value !== props.folder.name) {
-      await props.onRename(value);
+      props.onRename(value);
     }
   }
 
-  async function handleDelete(e?: MouseEvent) {
+  function handleDelete(e?: MouseEvent) {
     e?.stopPropagation();
     setMenuOpen(false);
-    await props.onDelete();
+    props.onDelete();
   }
 
-  async function handlePin(e?: MouseEvent) {
+  function handlePin(e?: MouseEvent) {
     e?.stopPropagation();
     setMenuOpen(false);
-    await props.onPin();
+    props.onPin();
   }
 
   return (
@@ -456,8 +457,8 @@ function FolderRowCustom(props: {
       }}
       onDblClick={beginRename}
       onContextMenu={handleContextMenu}
-      onDragEnter={props.onDragEnter}
-      onDragLeave={props.onDragLeave}
+      onDragEnter={() => props.onDragEnter()}
+      onDragLeave={() => props.onDragLeave()}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       title="Right-click for menu · double-click to rename"
@@ -467,7 +468,9 @@ function FolderRowCustom(props: {
         fallback={
           <span class="folder-row__label">
             <Show when={props.folder.pinned}>
-              <span class="folder-row__pin" title="Pinned">★</span>
+              <span class="folder-row__pin" title="Pinned">
+                ★
+              </span>
             </Show>
             {props.folder.name}
           </span>
@@ -500,10 +503,19 @@ function FolderRowCustom(props: {
           <button class="folder-row__menu-item" onClick={beginRename}>
             Rename
           </button>
-          <button class="folder-row__menu-item folder-row__menu-item--danger" onClick={handleDelete}>
+          <button
+            class="folder-row__menu-item folder-row__menu-item--danger"
+            onClick={handleDelete}
+          >
             Delete
           </button>
-          <button class="folder-row__menu-item" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }}>
+          <button
+            class="folder-row__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+            }}
+          >
             Cancel
           </button>
         </div>
@@ -773,10 +785,7 @@ function SessionRow(props: {
         </div>
       </Show>
       <Show when={showSettings()}>
-        <div
-          class="session-item__launch-options"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div class="session-item__launch-options" onClick={(e) => e.stopPropagation()}>
           <label class="launch-option">
             <input
               type="checkbox"
@@ -895,10 +904,7 @@ function PreviewPane(props: { session: SessionItem | null }) {
               </div>
             </div>
             <div class="preview-pane__body">
-              <Show
-                when={preview()}
-                fallback={<div class="preview-pane__loading">Loading…</div>}
-              >
+              <Show when={preview()} fallback={<div class="preview-pane__loading">Loading…</div>}>
                 {(p) => (
                   <>
                     <div class="preview-pane__section">

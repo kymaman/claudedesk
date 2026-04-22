@@ -27,7 +27,7 @@ export async function saveLaunchSettings(
   settings: LaunchSettings,
 ): Promise<void> {
   try {
-    await invoke<void>(IPC.SetLaunchSettings, {
+    await invoke<undefined>(IPC.SetLaunchSettings, {
       sessionId,
       agentId: settings.agentId,
       extraFlags: settings.extraFlags,

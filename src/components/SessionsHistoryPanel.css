@@ -91,6 +91,125 @@
   grid-template-columns: 200px 1fr 340px;
   min-height: 0;
   overflow: hidden;
+  transition: grid-template-columns 180ms ease;
+}
+
+/* When any chat is open: sessions become a narrow rail, preview is replaced
+   by the chats grid on the right. */
+.sessions-panel__body--compact {
+  grid-template-columns: 180px 260px 1fr;
+}
+
+.sessions-panel__body--compact.sessions-panel__body--folders-hidden {
+  grid-template-columns: 24px 260px 1fr;
+}
+
+.sessions-panel__body--folders-hidden {
+  grid-template-columns: 24px 1fr 340px;
+}
+
+.folders-pane__expand {
+  width: 24px;
+  height: 100%;
+  background: color-mix(in srgb, var(--fg) 5%, var(--bg));
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.folders-pane__expand:hover {
+  background: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  color: var(--fg);
+}
+
+.folders-pane__collapse {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+}
+
+.folders-pane__collapse:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.sessions-panel__chats {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+.folder-row__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--accent, #FF3E3E);
+  border-radius: 4px;
+  color: var(--fg);
+  font-family: inherit;
+  outline: none;
+}
+
+.folder-row__menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 8px;
+  right: 8px;
+  z-index: 50;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.folder-row__menu-item {
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  transition: background 80ms;
+}
+
+.folder-row__menu-item:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.folder-row__menu-item--danger:hover {
+  background: color-mix(in srgb, var(--accent, #FF3E3E) 25%, transparent);
+  color: var(--accent, #FF3E3E);
+}
+
+.folder-row {
+  position: relative;
 }
 
 .folders-pane {

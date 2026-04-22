@@ -156,3 +156,23 @@
   font-style: italic;
   white-space: nowrap;
 }
+
+.ts-settings {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-muted, var(--fg-subtle));
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ts-settings:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted, var(--fg-subtle));
+}

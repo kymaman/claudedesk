@@ -129,9 +129,42 @@ test('Hotkey Ctrl+H returns to History', async () => {
 test('Chats tab shows empty state when no chats open', async () => {
   await window.locator('.ts-nav', { hasText: 'Chats' }).click();
   await expect(window.locator('.chats-area')).toBeVisible();
-  // Hint text visible when no chats
-  const hint = window.locator('.chats-area__hint');
-  await expect(hint).toBeVisible();
+  // Hint text visible when no chats (now from ChatsGrid)
+  await expect(window.locator('.chats-grid__empty')).toBeVisible();
+});
+
+test('Settings gear in TopSwitcher opens Settings dialog', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.locator('.ts-settings').click();
+  // parallel-code Dialog uses .dialog-panel wrapper
+  await expect(window.locator('.dialog-panel').first()).toBeVisible({ timeout: 3_000 });
+  await window.keyboard.press('Escape');
+});
+
+test('Right-click custom folder opens menu with Rename + Delete', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.waitForTimeout(300);
+
+  // Create folder via direct IPC + force a UI reload so the row appears.
+  const folderName = `rc-test-${Date.now().toString().slice(-5)}`;
+  await window.evaluate(async (name) => {
+    const el = (window as unknown as { electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } } }).electron;
+    if (!el) throw new Error('electron bridge missing');
+    await el.ipcRenderer.invoke('create_folder', { name });
+  }, folderName);
+  await window.locator('.sessions-panel__refresh').click();
+  await window.waitForTimeout(700);
+
+  const row = window.locator('.folder-row', { hasText: folderName });
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.click({ button: 'right' });
+  const menu = window.locator('.folder-row__menu').first();
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.folder-row__menu-item', { hasText: 'Rename' })).toBeVisible();
+  await expect(
+    menu.locator('.folder-row__menu-item--danger', { hasText: 'Delete' }),
+  ).toBeVisible();
+  await menu.locator('.folder-row__menu-item', { hasText: 'Cancel' }).click();
 });
 
 test('Launch options gear expands per-session inline form', async () => {

@@ -43,8 +43,8 @@ import {
   saveLaunchSettings,
   type LaunchSettings,
 } from '../store/launch-settings';
-import { openChatFromSession } from '../store/chats';
-import { setMainView } from '../store/mainView';
+import { openChatFromSession, openChats } from '../store/chats';
+import { ChatsGrid } from './ChatsGrid';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
@@ -66,7 +66,11 @@ export function SessionsHistoryPanel(props: Props) {
   const [draggedFolderTarget, setDraggedFolderTarget] = createSignal<string | null>(null);
   const [creatingFolder, setCreatingFolder] = createSignal(false);
   const [newFolderName, setNewFolderName] = createSignal('');
+  const [foldersCollapsed, setFoldersCollapsed] = createSignal(false);
   let newFolderInputRef: HTMLInputElement | undefined;
+
+  // Compact mode when any chat is open: sessions rail + chats grid
+  const compact = () => openChats().length > 0;
 
   onMount(() => {
     if (sessions().length === 0) void loadSessions();
@@ -129,10 +133,20 @@ export function SessionsHistoryPanel(props: Props) {
         </Show>
       </div>
 
-      <div class="sessions-panel__body">
+      <div
+        class={`sessions-panel__body${compact() ? ' sessions-panel__body--compact' : ''}${foldersCollapsed() ? ' sessions-panel__body--folders-hidden' : ''}`}
+      >
+        <Show when={!foldersCollapsed()}>
         <aside class="folders-pane">
           <div class="folders-pane__head">
             <span class="folders-pane__label">Folders</span>
+            <button
+              class="folders-pane__collapse"
+              onClick={() => setFoldersCollapsed(true)}
+              title="Hide folders"
+            >
+              ‹
+            </button>
             <button
               class="folders-pane__add"
               onClick={beginCreateFolder}
@@ -229,6 +243,16 @@ export function SessionsHistoryPanel(props: Props) {
             </For>
           </Show>
         </aside>
+        </Show>
+        <Show when={foldersCollapsed()}>
+          <button
+            class="folders-pane__expand"
+            onClick={() => setFoldersCollapsed(false)}
+            title="Show folders"
+          >
+            ›
+          </button>
+        </Show>
 
         <div class="sessions-panel__list">
           <Show when={sessionsError()}>
@@ -255,7 +279,14 @@ export function SessionsHistoryPanel(props: Props) {
           </Show>
         </div>
 
-        <PreviewPane session={hoveredSession()} />
+        <Show
+          when={compact()}
+          fallback={<PreviewPane session={hoveredSession()} />}
+        >
+          <div class="sessions-panel__chats">
+            <ChatsGrid />
+          </div>
+        </Show>
       </div>
     </div>
   );
@@ -297,6 +328,11 @@ function FolderRowCustom(props: {
   onRename: (newName: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal('');
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  let inputRef: HTMLInputElement | undefined;
+
   function handleDragOver(e: DragEvent) {
     if (e.dataTransfer?.types.includes(DRAG_MIME)) {
       e.preventDefault();
@@ -310,33 +346,91 @@ function FolderRowCustom(props: {
     if (sessionId) void props.onDrop(sessionId);
   }
 
-  async function handleContextMenu(e: MouseEvent) {
+  function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
-    const choice = window.prompt(
-      `Folder "${props.folder.name}"\n\nType new name to rename, or type "delete" to delete:`,
-      props.folder.name,
-    );
-    if (!choice) return;
-    if (choice.toLowerCase() === 'delete') {
-      await props.onDelete();
-    } else if (choice !== props.folder.name) {
-      await props.onRename(choice);
+    e.stopPropagation();
+    setMenuOpen((v) => !v);
+  }
+
+  function beginRename(e?: MouseEvent) {
+    e?.stopPropagation();
+    setMenuOpen(false);
+    setDraft(props.folder.name);
+    setEditing(true);
+    requestAnimationFrame(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    });
+  }
+
+  async function commitRename() {
+    const value = draft().trim();
+    setEditing(false);
+    if (value && value !== props.folder.name) {
+      await props.onRename(value);
     }
+  }
+
+  async function handleDelete(e?: MouseEvent) {
+    e?.stopPropagation();
+    setMenuOpen(false);
+    await props.onDelete();
   }
 
   return (
     <button
       class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
-      onClick={props.onClick}
+      onClick={(e) => {
+        if (editing() || menuOpen()) {
+          e.stopPropagation();
+          return;
+        }
+        props.onClick();
+      }}
+      onDblClick={beginRename}
       onContextMenu={handleContextMenu}
       onDragEnter={props.onDragEnter}
       onDragLeave={props.onDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      title="Right-click to rename / delete"
+      title="Right-click for menu · double-click to rename"
     >
-      <span class="folder-row__label">{props.folder.name}</span>
+      <Show
+        when={editing()}
+        fallback={<span class="folder-row__label">{props.folder.name}</span>}
+      >
+        <input
+          ref={inputRef}
+          class="folder-row__input"
+          value={draft()}
+          onInput={(e) => setDraft(e.currentTarget.value)}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={() => void commitRename()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void commitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+        />
+      </Show>
       <span class="folder-row__count">{props.count}</span>
+      <Show when={menuOpen()}>
+        <div class="folder-row__menu" onClick={(e) => e.stopPropagation()}>
+          <button class="folder-row__menu-item" onClick={beginRename}>
+            Rename
+          </button>
+          <button class="folder-row__menu-item folder-row__menu-item--danger" onClick={handleDelete}>
+            Delete
+          </button>
+          <button class="folder-row__menu-item" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }}>
+            Cancel
+          </button>
+        </div>
+      </Show>
     </button>
   );
 }
@@ -384,7 +478,8 @@ function SessionRow(props: {
     setOpening(true);
     try {
       openChatFromSession(props.session, settings());
-      setMainView('chats');
+      // Stay in History — the chats grid auto-appears on the right side
+      // thanks to `compact()` mode.
     } catch (err) {
       console.error('[SessionRow] openChat failed:', err);
     } finally {

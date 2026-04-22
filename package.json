@@ -84,6 +84,7 @@
   "build": {
     "appId": "com.claudedesk.app",
     "productName": "ClaudeDesk",
+    "npmRebuild": false,
     "directories": {
       "buildResources": "build",
       "output": "release"

@@ -1,0 +1,125 @@
+/* Arena — battle screen */
+
+.arena-battle {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  gap: 2px;
+}
+
+.arena-battle-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--task-panel-bg);
+  border: 1px solid var(--border-subtle);
+  border-top: 2px solid var(--arena-color, var(--accent));
+  overflow: hidden;
+}
+
+.arena-battle-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--arena-color, var(--accent)) 4%, transparent);
+}
+
+.arena-battle-panel-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arena-battle-panel-name::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--arena-color, var(--accent));
+  flex-shrink: 0;
+}
+
+.arena-battle-panel-timer {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.arena-battle-panel-timer:not([data-done='true']) {
+  animation: arena-timer-pulse 1.8s ease-in-out infinite;
+}
+
+.arena-battle-panel-timer[data-done='true'] {
+  color: var(--success);
+  animation: none;
+}
+
+@keyframes arena-timer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.arena-stop-btn {
+  background: none;
+  border: none;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.arena-stop-btn:hover {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+
+.arena-battle-panel-files {
+  flex-shrink: 0;
+  height: 140px;
+  border-top: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.arena-vs-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  font-family: var(--font-display);
+  color: var(--fg-muted);
+  letter-spacing: 0.06em;
+  padding: 0 8px;
+  flex-shrink: 0;
+  writing-mode: vertical-lr;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+}
+
+/* --- Reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .arena-battle-panel-timer:not([data-done='true']) {
+    animation: none;
+  }
+}

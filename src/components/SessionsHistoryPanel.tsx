@@ -1,0 +1,565 @@
+/**
+ * SessionsHistoryPanel.tsx
+ * Main History view: folders sidebar · session list · preview pane.
+ *
+ * Interactions:
+ *  - Click row → resume in terminal with current agent version
+ *  - Hover row → preview on the right pane (first/last 5 messages)
+ *  - Double-click title → inline rename
+ *  - Drag row → drop on folder to add membership
+ *  - "+ New folder" creates a custom folder
+ */
+
+import { createSignal, onMount, For, Show, createMemo, createResource } from 'solid-js';
+import './SessionsHistoryPanel.css';
+import { store } from '../store/store';
+import {
+  sessions,
+  searchQuery,
+  setSearchQuery,
+  sessionsLoading,
+  sessionsError,
+  loadSessions,
+  renameSessionLocal,
+  resumeSession,
+  filteredSessions,
+  folders,
+  activeFolderId,
+  setActiveFolderId,
+  loadFolders,
+  createFolderAction,
+  renameFolderAction,
+  deleteFolderAction,
+  addSessionToFolderAction,
+  removeSessionFromFolderAction,
+  fetchSessionPreview,
+  type SessionItem,
+  type FolderItem,
+} from '../store/sessions-history';
+
+interface Props {
+  /** When provided, renders a close button in the header (overlay mode). */
+  onClose?: () => void;
+}
+
+const DRAG_MIME = 'application/x-claudedesk-session-id';
+
+function claudeAgents() {
+  const list = store.availableAgents.filter(
+    (a) => a.id.startsWith('claude-') && a.available !== false,
+  );
+  if (list.length === 0) return store.availableAgents.filter((a) => a.id.startsWith('claude-'));
+  return list;
+}
+
+export function SessionsHistoryPanel(props: Props) {
+  const [hoveredSession, setHoveredSession] = createSignal<SessionItem | null>(null);
+  const [draggedFolderTarget, setDraggedFolderTarget] = createSignal<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = createSignal(false);
+  const [newFolderName, setNewFolderName] = createSignal('');
+  let newFolderInputRef: HTMLInputElement | undefined;
+
+  onMount(() => {
+    if (sessions().length === 0) void loadSessions();
+    void loadFolders();
+  });
+
+  function beginCreateFolder() {
+    setCreatingFolder(true);
+    setNewFolderName('');
+    requestAnimationFrame(() => newFolderInputRef?.focus());
+  }
+
+  async function commitCreateFolder() {
+    const name = newFolderName().trim();
+    setCreatingFolder(false);
+    setNewFolderName('');
+    if (name) await createFolderAction(name);
+  }
+
+  function cancelCreateFolder() {
+    setCreatingFolder(false);
+    setNewFolderName('');
+  }
+
+  return (
+    <div class="sessions-panel">
+      <div class="sessions-panel__header">
+        <span class="sessions-panel__title">History</span>
+        <input
+          class="sessions-panel__search"
+          type="search"
+          placeholder="Search title, project, description..."
+          value={searchQuery()}
+          onInput={(e) => setSearchQuery(e.currentTarget.value)}
+        />
+        <button
+          class="sessions-panel__refresh"
+          onClick={() => {
+            void loadSessions();
+            void loadFolders();
+          }}
+          title="Refresh"
+          disabled={sessionsLoading()}
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            style={sessionsLoading() ? 'animation: spin 1s linear infinite' : undefined}
+          >
+            <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z" />
+            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z" />
+          </svg>
+        </button>
+        <Show when={props.onClose}>
+          <button class="sessions-panel__close" onClick={() => props.onClose?.()} title="Close">
+            &times;
+          </button>
+        </Show>
+      </div>
+
+      <div class="sessions-panel__body">
+        <aside class="folders-pane">
+          <div class="folders-pane__head">
+            <span class="folders-pane__label">Folders</span>
+            <button
+              class="folders-pane__add"
+              onClick={beginCreateFolder}
+              title="Create new folder"
+              disabled={creatingFolder()}
+            >
+              +
+            </button>
+          </div>
+
+          <Show when={creatingFolder()}>
+            <div class="folder-create">
+              <input
+                ref={newFolderInputRef}
+                class="folder-create__input"
+                value={newFolderName()}
+                placeholder="Folder name…"
+                onInput={(e) => setNewFolderName(e.currentTarget.value)}
+                onBlur={() => void commitCreateFolder()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitCreateFolder();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelCreateFolder();
+                  }
+                }}
+              />
+            </div>
+          </Show>
+
+          <FolderRow
+            label="All sessions"
+            active={activeFolderId() === null}
+            onClick={() => setActiveFolderId(null)}
+            count={sessions().length}
+            highlight={false}
+          />
+          <For each={folders()}>
+            {(folder) => (
+              <FolderRowCustom
+                folder={folder}
+                active={activeFolderId() === folder.id}
+                highlight={draggedFolderTarget() === folder.id}
+                count={sessions().filter((s) => s.folderIds.includes(folder.id)).length}
+                onClick={() => setActiveFolderId(folder.id)}
+                onDragEnter={() => setDraggedFolderTarget(folder.id)}
+                onDragLeave={() => {
+                  if (draggedFolderTarget() === folder.id) setDraggedFolderTarget(null);
+                }}
+                onDrop={async (sessionId) => {
+                  setDraggedFolderTarget(null);
+                  await addSessionToFolderAction(sessionId, folder.id);
+                }}
+                onRename={async (newName) => {
+                  await renameFolderAction(folder.id, newName);
+                }}
+                onDelete={async () => {
+                  if (window.confirm(`Delete folder "${folder.name}"? Sessions are not deleted.`)) {
+                    await deleteFolderAction(folder.id);
+                  }
+                }}
+              />
+            )}
+          </For>
+        </aside>
+
+        <div class="sessions-panel__list">
+          <Show when={sessionsError()}>
+            {(err) => <div class="sessions-panel__error">Error: {err()}</div>}
+          </Show>
+
+          <Show
+            when={filteredSessions().length > 0}
+            fallback={
+              <div class="sessions-panel__empty">
+                {sessionsLoading() ? 'Loading sessions...' : 'No sessions found.'}
+              </div>
+            }
+          >
+            <For each={filteredSessions()}>
+              {(session) => (
+                <SessionRow
+                  session={session}
+                  onClose={props.onClose ?? (() => {})}
+                  onHover={(s) => setHoveredSession(s)}
+                />
+              )}
+            </For>
+          </Show>
+        </div>
+
+        <PreviewPane session={hoveredSession()} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Folder rows
+// ---------------------------------------------------------------------------
+
+function FolderRow(props: {
+  label: string;
+  count?: number;
+  active: boolean;
+  highlight: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
+      onClick={props.onClick}
+    >
+      <span class="folder-row__label">{props.label}</span>
+      <Show when={typeof props.count === 'number'}>
+        <span class="folder-row__count">{props.count}</span>
+      </Show>
+    </button>
+  );
+}
+
+function FolderRowCustom(props: {
+  folder: FolderItem;
+  active: boolean;
+  highlight: boolean;
+  count: number;
+  onClick: () => void;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
+  onDrop: (sessionId: string) => Promise<void>;
+  onRename: (newName: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  function handleDragOver(e: DragEvent) {
+    if (e.dataTransfer?.types.includes(DRAG_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    const sessionId = e.dataTransfer?.getData(DRAG_MIME);
+    if (sessionId) void props.onDrop(sessionId);
+  }
+
+  async function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    const choice = window.prompt(
+      `Folder "${props.folder.name}"\n\nType new name to rename, or type "delete" to delete:`,
+      props.folder.name,
+    );
+    if (!choice) return;
+    if (choice.toLowerCase() === 'delete') {
+      await props.onDelete();
+    } else if (choice !== props.folder.name) {
+      await props.onRename(choice);
+    }
+  }
+
+  return (
+    <button
+      class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
+      onClick={props.onClick}
+      onContextMenu={handleContextMenu}
+      onDragEnter={props.onDragEnter}
+      onDragLeave={props.onDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      title="Right-click to rename / delete"
+    >
+      <span class="folder-row__label">{props.folder.name}</span>
+      <span class="folder-row__count">{props.count}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session row
+// ---------------------------------------------------------------------------
+
+function SessionRow(props: {
+  session: SessionItem;
+  onClose: () => void;
+  onHover: (s: SessionItem) => void;
+}) {
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal('');
+  const [opening, setOpening] = createSignal(false);
+  const agents = createMemo(() => claudeAgents());
+  const [selectedAgentId, setSelectedAgentId] = createSignal<string>('claude-opus-4-7');
+  let inputRef: HTMLInputElement | undefined;
+
+  function startEdit() {
+    setDraft(props.session.title);
+    setEditing(true);
+    requestAnimationFrame(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    });
+  }
+
+  async function handleResume(e: MouseEvent) {
+    e.stopPropagation();
+    if (opening()) return;
+    setOpening(true);
+    const taskId = await resumeSession(props.session, { agentId: selectedAgentId() });
+    setOpening(false);
+    if (taskId) props.onClose();
+  }
+
+  async function commitEdit() {
+    const value = draft().trim();
+    setEditing(false);
+    if (value !== props.session.title) {
+      await renameSessionLocal(props.session.sessionId, value);
+    }
+  }
+
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void commitEdit();
+    }
+    if (e.key === 'Escape') {
+      setEditing(false);
+    }
+  }
+
+  function handleDragStart(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(DRAG_MIME, props.session.sessionId);
+    e.dataTransfer.setData('text/plain', props.session.title);
+    e.dataTransfer.effectAllowed = 'copy';
+  }
+
+  function shortPath(p: string): string {
+    const sep = p.includes('\\') ? '\\' : '/';
+    const parts = p.split(sep);
+    if (parts.length <= 2) return p;
+    return '...' + sep + parts.slice(-2).join(sep);
+  }
+
+  async function handleRemoveFromFolder(folderId: string, e: MouseEvent) {
+    e.stopPropagation();
+    await removeSessionFromFolderAction(props.session.sessionId, folderId);
+  }
+
+  return (
+    <div
+      class={`session-item${editing() ? ' session-item--editing' : ''}`}
+      draggable={!editing()}
+      onDragStart={handleDragStart}
+      onMouseEnter={() => props.onHover(props.session)}
+      onClick={(e) => {
+        if (editing()) return;
+        void handleResume(e);
+      }}
+      onDblClick={(e) => {
+        e.stopPropagation();
+        startEdit();
+      }}
+      title="Click to resume · double-click to rename · drag to folder"
+    >
+      <div class="session-item__title-row">
+        <Show
+          when={editing()}
+          fallback={<span class="session-item__title">{props.session.title}</span>}
+        >
+          <input
+            ref={inputRef}
+            class="session-item__title-input"
+            value={draft()}
+            onInput={(e) => setDraft(e.currentTarget.value)}
+            onKeyDown={onKeyDown}
+            onBlur={() => void commitEdit()}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Show>
+        <span class="session-item__date">{props.session.date}</span>
+        <select
+          class="session-item__version"
+          value={selectedAgentId()}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            e.stopPropagation();
+            setSelectedAgentId(e.currentTarget.value);
+          }}
+          title="CLI version to resume with"
+        >
+          <For each={agents()}>
+            {(a) => <option value={a.id}>{a.name.replace(/^Claude Code\s*/, '')}</option>}
+          </For>
+        </select>
+        <button
+          class="session-item__resume"
+          onClick={handleResume}
+          disabled={opening()}
+          title={`Resume with ${selectedAgentId()}`}
+        >
+          {opening() ? '…' : '▶'}
+        </button>
+      </div>
+      <div class="session-item__project" title={props.session.projectPath}>
+        {shortPath(props.session.projectPath)}
+      </div>
+      <Show when={props.session.description}>
+        {(desc) => <div class="session-item__desc">{desc()}</div>}
+      </Show>
+      <Show when={props.session.folderIds.length > 0}>
+        <div class="session-item__tags">
+          <For each={props.session.folderIds}>
+            {(fid) => {
+              const folder = folders().find((f) => f.id === fid);
+              if (!folder) return null;
+              return (
+                <span class="session-tag" title="Click × to remove from folder">
+                  <span>{folder.name}</span>
+                  <button
+                    class="session-tag__x"
+                    onClick={(e) => void handleRemoveFromFolder(fid, e)}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preview pane (right column)
+// ---------------------------------------------------------------------------
+
+function PreviewPane(props: { session: SessionItem | null }) {
+  const [preview] = createResource(
+    () => props.session,
+    async (s) => {
+      if (!s) return null;
+      try {
+        return await fetchSessionPreview(s.filePath);
+      } catch {
+        return null;
+      }
+    },
+  );
+
+  function cleanLine(line: string): string {
+    try {
+      const obj = JSON.parse(line) as {
+        type?: string;
+        summary?: string;
+        message?: { role?: string; content?: unknown };
+      };
+      if (obj.type === 'summary' && typeof obj.summary === 'string') {
+        return `[summary] ${obj.summary}`;
+      }
+      if (obj.type === 'user' && obj.message?.content) {
+        const c = obj.message.content;
+        if (typeof c === 'string') return `[user] ${c.replace(/<[^>]+>/g, '').slice(0, 300)}`;
+        if (Array.isArray(c)) {
+          for (const part of c) {
+            if (part && typeof part === 'object') {
+              const p = part as { type?: string; text?: string };
+              if (p.type === 'text' && p.text) return `[user] ${p.text.slice(0, 300)}`;
+            }
+          }
+        }
+      }
+      if (obj.type === 'assistant' && obj.message?.content) {
+        const c = obj.message.content;
+        if (Array.isArray(c)) {
+          for (const part of c) {
+            if (part && typeof part === 'object') {
+              const p = part as { type?: string; text?: string };
+              if (p.type === 'text' && p.text) return `[asst] ${p.text.slice(0, 300)}`;
+            }
+          }
+        }
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  return (
+    <aside class="preview-pane">
+      <Show
+        when={props.session}
+        fallback={
+          <div class="preview-pane__empty">Hover a session to preview its first/last messages.</div>
+        }
+      >
+        {(s) => (
+          <>
+            <div class="preview-pane__head">
+              <div class="preview-pane__title">{s().title}</div>
+              <div class="preview-pane__meta">
+                {s().date} · {s().sessionId.slice(0, 8)}
+              </div>
+            </div>
+            <div class="preview-pane__body">
+              <Show
+                when={preview()}
+                fallback={<div class="preview-pane__loading">Loading…</div>}
+              >
+                {(p) => (
+                  <>
+                    <div class="preview-pane__section">
+                      <div class="preview-pane__section-label">First messages</div>
+                      <For each={p().firstLines.map(cleanLine).filter(Boolean).slice(0, 4)}>
+                        {(line) => <div class="preview-pane__line">{line}</div>}
+                      </For>
+                    </div>
+                    <Show when={p().lastLines.length > 0}>
+                      <div class="preview-pane__section">
+                        <div class="preview-pane__section-label">Last messages</div>
+                        <For each={p().lastLines.map(cleanLine).filter(Boolean).slice(-4)}>
+                          {(line) => <div class="preview-pane__line">{line}</div>}
+                        </For>
+                      </div>
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </div>
+          </>
+        )}
+      </Show>
+    </aside>
+  );
+}

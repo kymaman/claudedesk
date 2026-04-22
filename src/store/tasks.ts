@@ -1,0 +1,725 @@
+import { produce } from 'solid-js/store';
+import { invoke, Channel } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
+import { store, setStore, cleanupPanelEntries } from './core';
+import { saveState } from './persistence';
+import { setTaskFocusedPanel } from './focus';
+import { getProject, getProjectPath, getProjectBranchPrefix, isProjectMissing } from './projects';
+import { setPendingShellCommand } from '../lib/bookmarks';
+import {
+  markAgentSpawned,
+  markAgentBusy,
+  clearAgentActivity,
+  isAgentIdle,
+  rescheduleTaskStatusPolling,
+} from './taskStatus';
+import { recordMergedLines, recordTaskCompleted } from './completion';
+import { cleanTaskName } from '../lib/clean-task-name';
+import type {
+  AgentDef,
+  CreateTaskResult,
+  ImportableWorktree,
+  MergeResult,
+  StepEntry,
+} from '../ipc/types';
+import { parseGitHubUrl, taskNameFromGitHubUrl } from '../lib/github-url';
+import type { Agent, Task, GitIsolationMode } from './types';
+import type { DockerSource } from '../lib/docker';
+
+function initTaskInStore(
+  taskId: string,
+  task: Task,
+  agent: Agent,
+  projectId: string,
+  agentDef: AgentDef | undefined,
+): void {
+  setStore(
+    produce((s) => {
+      s.tasks[taskId] = task;
+      s.agents[agent.id] = agent;
+      s.taskOrder.push(taskId);
+      s.activeTaskId = taskId;
+      s.activeAgentId = agent.id;
+      s.lastProjectId = projectId;
+      if (agentDef) s.lastAgentId = agentDef.id;
+    }),
+  );
+  markAgentSpawned(agent.id);
+  rescheduleTaskStatusPolling();
+}
+
+const AGENT_WRITE_READY_TIMEOUT_MS = 8_000;
+const AGENT_WRITE_RETRY_MS = 50;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAgentNotFoundError(err: unknown): boolean {
+  return String(err).toLowerCase().includes('agent not found');
+}
+
+async function writeToAgentWhenReady(agentId: string, data: string): Promise<void> {
+  const deadline = Date.now() + AGENT_WRITE_READY_TIMEOUT_MS;
+  let lastErr: unknown;
+
+  while (Date.now() <= deadline) {
+    try {
+      await invoke(IPC.WriteToAgent, { agentId, data });
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!isAgentNotFoundError(err)) throw err;
+      const agent = store.agents[agentId];
+      if (!agent || agent.status !== 'running') throw err;
+      await sleep(AGENT_WRITE_RETRY_MS);
+    }
+  }
+
+  throw lastErr ?? new Error(`Timed out waiting for agent ${agentId} to become writable`);
+}
+
+const STEPS_INSTRUCTION =
+  'IMPORTANT: Maintain .claude/steps.json throughout this task. ' +
+  'This file is the engineering-manager view of the task — it must always answer "what is going on right now?" at a glance, including any work delegated to sub-agents. ' +
+  'Append a new entry at every meaningful transition (starting a phase, completing it, spawning sub-agents, hitting a blocker, or reaching awaiting_review). Never modify previous entries.\n' +
+  'Fields:\n' +
+  '  summary: ≤60 chars. Outcome-oriented, not action-oriented. Describe what was decided or completed, not what you are doing. E.g. "Auth middleware complete — JWT + rate-limit" not "Implementing auth middleware".\n' +
+  '  detail: one sentence max, only if it adds context the summary cannot carry — omit otherwise.\n' +
+  '  status: starting | investigating | implementing | testing | awaiting_review | done.\n' +
+  '  files_touched: only files you actually wrote or modified in this step, not files you read.\n' +
+  '  agent_id: short label for the sub-agent doing this work (e.g. "auth-worker", "test-runner"). Omit for your own entries. Use the same id consistently across all entries from one delegated agent so the UI can group them.\n' +
+  'Sub-agents: when you spawn a sub-agent, append one entry describing what it will work on, including its agent_id. When it finishes, append a completion entry with the same agent_id and its outcome.\n' +
+  'Example: {"summary":"Auth middleware complete — JWT + rate-limit","status":"implementing","files_touched":["src/middleware/auth.ts"]}.\n' +
+  'Sub-agent example: {"summary":"Schema migration generated","status":"implementing","agent_id":"db-worker","files_touched":["migrations/0042_users.sql"]}.\n' +
+  'When you want the user to review your work: write an entry with status "awaiting_review" describing the decision or action you need from them, then pause.';
+
+export interface CreateTaskOptions {
+  name: string;
+  agentDef: AgentDef;
+  projectId: string;
+  gitIsolation: GitIsolationMode;
+  baseBranch: string;
+  symlinkDirs?: string[];
+  branchPrefixOverride?: string;
+  initialPrompt?: string;
+  githubUrl?: string;
+  skipPermissions?: boolean;
+  dockerMode?: boolean;
+  dockerSource?: DockerSource;
+  dockerImage?: string;
+  stepsEnabled?: boolean;
+}
+
+export async function createTask(opts: CreateTaskOptions): Promise<string> {
+  const {
+    name,
+    agentDef,
+    projectId,
+    gitIsolation,
+    baseBranch,
+    symlinkDirs = [],
+    initialPrompt,
+    githubUrl,
+    skipPermissions,
+    dockerMode,
+    dockerSource,
+    dockerImage,
+  } = opts;
+  const projectRoot = getProjectPath(projectId);
+  if (!projectRoot) throw new Error('Project not found');
+  if (isProjectMissing(projectId)) throw new Error('Project folder not found');
+
+  let taskId: string;
+  let branchName: string;
+  let worktreePath: string;
+
+  if (gitIsolation === 'worktree') {
+    const branchPrefix = opts.branchPrefixOverride ?? getProjectBranchPrefix(projectId);
+    const result = await invoke<CreateTaskResult>(IPC.CreateTask, {
+      name,
+      projectRoot,
+      symlinkDirs,
+      branchPrefix,
+      baseBranch: baseBranch || undefined,
+    });
+    taskId = result.id;
+    branchName = result.branch_name;
+    worktreePath = result.worktree_path;
+  } else {
+    if (hasDirectTask(projectId)) {
+      throw new Error('This project already has a task on the current branch');
+    }
+    taskId = crypto.randomUUID();
+    branchName = baseBranch;
+    worktreePath = projectRoot;
+  }
+
+  const agentId = crypto.randomUUID();
+
+  // Per-task steps tracking — explicit opt-in from dialog, or fall back to last-used preference
+  const stepsEnabled = opts.stepsEnabled ?? store.showSteps;
+  // Remember this choice so the dialog defaults to it next time
+  if (stepsEnabled !== store.showSteps) setStore('showSteps', stepsEnabled);
+
+  // Inject steps instruction into the first prompt so the agent maintains steps.json.
+  // Appended after a separator for recency bias; savedInitialPrompt keeps the original clean text.
+  // Only possible here when an initialPrompt was provided; if not, sendPrompt handles injection.
+  const effectivePrompt =
+    stepsEnabled && initialPrompt ? `${initialPrompt}\n\n---\n${STEPS_INSTRUCTION}` : initialPrompt;
+
+  const task: Task = {
+    id: taskId,
+    name,
+    projectId,
+    gitIsolation,
+    baseBranch: baseBranch || undefined,
+    branchName,
+    worktreePath,
+    agentIds: [agentId],
+    shellAgentIds: [],
+    notes: '',
+    lastPrompt: '',
+    initialPrompt: effectivePrompt ?? undefined,
+    savedInitialPrompt: initialPrompt ?? undefined,
+    stepsEnabled: stepsEnabled || undefined,
+    skipPermissions: skipPermissions ?? undefined,
+    dockerMode: dockerMode ?? undefined,
+    dockerSource: dockerSource ?? undefined,
+    dockerImage: dockerImage ?? undefined,
+    githubUrl,
+  };
+
+  const agent: Agent = {
+    id: agentId,
+    taskId,
+    def: agentDef,
+    resumed: false,
+    status: 'running',
+    exitCode: null,
+    signal: null,
+    lastOutput: [],
+    generation: 0,
+  };
+
+  initTaskInStore(taskId, task, agent, projectId, agentDef);
+  saveState(); // fire-and-forget — errors handled internally
+  return taskId;
+}
+
+export interface CreateImportedTaskOptions {
+  projectId: string;
+  worktree: ImportableWorktree;
+  agentDef: AgentDef;
+}
+
+function deriveImportedTaskName(branchName: string, worktreePath: string): string {
+  const branchTail = branchName.split('/').pop()?.trim() ?? '';
+  const normalized = branchTail.replace(/[-_]+/g, ' ').trim();
+  if (normalized) return cleanTaskName(normalized);
+  return worktreePath.split('/').pop()?.trim() || branchName;
+}
+
+function hasTaskForWorktreePath(worktreePath: string): boolean {
+  const allIds = [...store.taskOrder, ...store.collapsedTaskOrder];
+  return allIds.some((id) => store.tasks[id]?.worktreePath === worktreePath);
+}
+
+export async function createImportedTask(opts: CreateImportedTaskOptions): Promise<string> {
+  const { projectId, worktree, agentDef } = opts;
+  if (!getProjectPath(projectId)) throw new Error('Project not found');
+  if (isProjectMissing(projectId)) throw new Error('Project folder not found');
+  if (hasTaskForWorktreePath(worktree.path)) {
+    throw new Error('Worktree is already tracked as a task');
+  }
+
+  const id = crypto.randomUUID();
+  const agentId = crypto.randomUUID();
+  const name = deriveImportedTaskName(worktree.branch_name, worktree.path);
+  const baseBranch = getProject(projectId)?.defaultBaseBranch || undefined;
+
+  const task: Task = {
+    id,
+    name,
+    projectId,
+    gitIsolation: 'worktree',
+    baseBranch,
+    branchName: worktree.branch_name,
+    worktreePath: worktree.path,
+    agentIds: [agentId],
+    shellAgentIds: [],
+    notes: '',
+    lastPrompt: '',
+    externalWorktree: true,
+  };
+
+  const agent: Agent = {
+    id: agentId,
+    taskId: id,
+    def: agentDef,
+    resumed: false,
+    status: 'running',
+    exitCode: null,
+    signal: null,
+    lastOutput: [],
+    generation: 0,
+  };
+
+  initTaskInStore(id, task, agent, projectId, agentDef);
+  saveState();
+  return id;
+}
+
+export async function closeTask(taskId: string): Promise<void> {
+  const task = store.tasks[taskId];
+  if (!task || task.closingStatus === 'closing' || task.closingStatus === 'removing') return;
+
+  const agentIds = [...task.agentIds];
+  const shellAgentIds = [...task.shellAgentIds];
+  const branchName = task.branchName;
+  const projectRoot = getProjectPath(task.projectId) ?? '';
+  const deleteBranch = task.externalWorktree
+    ? false
+    : (getProject(task.projectId)?.deleteBranchOnClose ?? true);
+
+  // Mark as closing — task stays visible but UI shows closing state
+  setStore('tasks', taskId, 'closingStatus', 'closing');
+  setStore('tasks', taskId, 'closingError', undefined);
+
+  // Stop plan file watcher to prevent FSWatcher leak
+  invoke(IPC.StopPlanWatcher, { taskId }).catch(console.error);
+
+  try {
+    // Kill agents
+    for (const agentId of agentIds) {
+      await invoke(IPC.KillAgent, { agentId }).catch(console.error);
+    }
+    for (const shellId of shellAgentIds) {
+      await invoke(IPC.KillAgent, { agentId: shellId }).catch(console.error);
+    }
+
+    // Skip git cleanup for direct mode (no worktree/branch) and imported worktrees (user-owned).
+    if (task.gitIsolation === 'worktree' && !task.externalWorktree) {
+      // Remove worktree + branch
+      await invoke(IPC.DeleteTask, {
+        taskId,
+        agentIds: [...agentIds, ...shellAgentIds],
+        branchName,
+        deleteBranch,
+        projectRoot,
+      });
+    }
+
+    // Backend cleanup succeeded — remove from UI
+    removeTaskFromStore(taskId, [...agentIds, ...shellAgentIds]);
+  } catch (err) {
+    // Backend cleanup failed — show error, allow retry
+    console.error('Failed to close task:', err);
+    setStore('tasks', taskId, 'closingStatus', 'error');
+    setStore('tasks', taskId, 'closingError', String(err));
+  }
+}
+
+export async function retryCloseTask(taskId: string): Promise<void> {
+  setStore('tasks', taskId, 'closingStatus', undefined);
+  setStore('tasks', taskId, 'closingError', undefined);
+  await closeTask(taskId);
+}
+
+const REMOVE_ANIMATION_MS = 300;
+
+function removeTaskFromStore(taskId: string, agentIds: string[]): void {
+  recordTaskCompleted();
+
+  // Stop the plan file watcher (fs.FSWatcher + poll interval) on the backend.
+  // This is the single convergence point for all task removal paths (close,
+  // merge+cleanup, current-branch-mode close), so placing it here prevents leaks
+  // regardless of which path removed the task.  Idempotent if already stopped.
+  invoke(IPC.StopPlanWatcher, { taskId }).catch(console.error);
+  invoke(IPC.StopStepsWatcher, { taskId }).catch(console.error);
+
+  // Clean up agent activity tracking (timers, buffers, decoders) before
+  // the store entries are deleted — otherwise markAgentExited can't find
+  // the agent and skips cleanup, leaking module-level Map entries.
+  for (const agentId of agentIds) {
+    clearAgentActivity(agentId);
+  }
+
+  // Phase 1: mark as removing so UI can animate
+  setStore('tasks', taskId, 'closingStatus', 'removing');
+
+  // Phase 2: actually delete after animation completes
+  setTimeout(() => {
+    setStore(
+      produce((s) => {
+        delete s.tasks[taskId];
+        delete s.taskGitStatus[taskId];
+
+        // Compute neighbor BEFORE cleanupPanelEntries removes taskId from taskOrder
+        let neighbor: string | null = null;
+        if (s.activeTaskId === taskId) {
+          const idx = s.taskOrder.indexOf(taskId);
+          const filteredOrder = s.taskOrder.filter((id) => id !== taskId);
+          const neighborIdx = idx <= 0 ? 0 : idx - 1;
+          neighbor = filteredOrder[neighborIdx] ?? null;
+        }
+
+        cleanupPanelEntries(s, taskId);
+
+        if (s.activeTaskId === taskId) {
+          s.activeTaskId = neighbor;
+          const neighborTask = neighbor ? s.tasks[neighbor] : null;
+          s.activeAgentId = neighborTask?.agentIds[0] ?? null;
+        }
+
+        for (const agentId of agentIds) {
+          delete s.agents[agentId];
+        }
+      }),
+    );
+
+    rescheduleTaskStatusPolling();
+  }, REMOVE_ANIMATION_MS);
+}
+
+export async function mergeTask(
+  taskId: string,
+  options?: { squash?: boolean; message?: string; cleanup?: boolean },
+): Promise<void> {
+  const task = store.tasks[taskId];
+  if (!task || task.closingStatus === 'removing') return;
+  if (task.gitIsolation === 'direct') return;
+
+  const projectRoot = getProjectPath(task.projectId);
+  if (!projectRoot) return;
+
+  const agentIds = [...task.agentIds];
+  const shellAgentIds = [...task.shellAgentIds];
+  const branchName = task.branchName;
+  // Imported worktrees are user-owned; never let cleanup delete them or their branch,
+  // even if the caller (or a dialog toggle) requests it.
+  const cleanup = task.externalWorktree ? false : (options?.cleanup ?? false);
+
+  // Merge branch into main. Cleanup is optional.
+  // NOTE: agents are killed AFTER merge succeeds — killing them before would
+  // destroy terminals with no way to recover if the merge fails (e.g. due to
+  // uncommitted changes in the project root).
+  const mergeResult = await invoke<MergeResult>(IPC.MergeTask, {
+    projectRoot,
+    branchName,
+    worktreePath: task.worktreePath,
+    baseBranch: task.baseBranch,
+    squash: options?.squash ?? false,
+    message: options?.message,
+    cleanup,
+  });
+  recordMergedLines(mergeResult.lines_added, mergeResult.lines_removed);
+
+  if (cleanup) {
+    await Promise.allSettled(
+      [...agentIds, ...shellAgentIds].map((id) => invoke(IPC.KillAgent, { agentId: id })),
+    );
+    removeTaskFromStore(taskId, [...agentIds, ...shellAgentIds]);
+  }
+}
+
+export async function pushTask(taskId: string, onOutput: Channel<string>): Promise<void> {
+  const task = store.tasks[taskId];
+  if (!task || task.gitIsolation === 'direct') return;
+
+  const projectRoot = getProjectPath(task.projectId);
+  if (!projectRoot) return;
+
+  await invoke(IPC.PushTask, {
+    projectRoot,
+    branchName: task.branchName,
+    onOutput,
+  });
+}
+
+export function updateTaskName(taskId: string, name: string): void {
+  setStore('tasks', taskId, 'name', name);
+}
+
+export function updateTaskBranch(taskId: string, branchName: string): void {
+  setStore('tasks', taskId, 'branchName', branchName);
+}
+
+export function updateTaskNotes(taskId: string, notes: string): void {
+  setStore('tasks', taskId, 'notes', notes);
+}
+
+export async function sendPrompt(taskId: string, agentId: string, text: string): Promise<void> {
+  const task = store.tasks[taskId];
+
+  // When steps tracking is enabled but no initial prompt was provided in the dialog,
+  // the steps instruction was never injected in createTask.  Append it to the first
+  // prompt the user sends so the agent still knows to maintain steps.json.
+  const injectSteps = !!(task?.stepsEnabled && !task?.lastPrompt && !task?.initialPrompt);
+  const effectiveText = injectSteps ? `${text}\n\n---\n${STEPS_INSTRUCTION}` : text;
+
+  // Send a Focus In escape sequence before the prompt text.  When the user focuses
+  // the PromptInput textarea, the xterm.js terminal loses DOM focus.  For agents
+  // that enable focus tracking (\x1b[?1004h), xterm.js sends \x1b[O (Focus Out)
+  // to the PTY, which may suspend readline input processing; \x1b[I re-activates it.
+  await writeToAgentWhenReady(agentId, '\x1b[I');
+  // Send text and Enter separately so TUI apps (Claude Code, Codex)
+  // don't treat the \r as part of a pasted block
+  setTaskLastInputAt(taskId);
+  await writeToAgentWhenReady(agentId, effectiveText);
+  await new Promise((r) => setTimeout(r, 50));
+  await writeToAgentWhenReady(agentId, '\r');
+  setStore('tasks', taskId, 'lastPrompt', text);
+}
+
+export function setLastPrompt(taskId: string, text: string): void {
+  setStore('tasks', taskId, 'lastPrompt', text);
+}
+
+export function clearInitialPrompt(taskId: string): void {
+  setStore('tasks', taskId, 'initialPrompt', undefined);
+}
+
+export function clearPrefillPrompt(taskId: string): void {
+  setStore('tasks', taskId, 'prefillPrompt', undefined);
+}
+
+export function setPrefillPrompt(taskId: string, text: string): void {
+  setStore('tasks', taskId, 'prefillPrompt', text);
+}
+
+export function reorderTask(fromIndex: number, toIndex: number): void {
+  if (fromIndex === toIndex) return;
+  setStore(
+    produce((s) => {
+      const len = s.taskOrder.length;
+      if (fromIndex < 0 || fromIndex >= len || toIndex < 0 || toIndex >= len) return;
+      const [moved] = s.taskOrder.splice(fromIndex, 1);
+      s.taskOrder.splice(toIndex, 0, moved);
+    }),
+  );
+}
+
+export function spawnShellForTask(taskId: string, initialCommand?: string): string {
+  const shellId = crypto.randomUUID();
+  if (initialCommand) setPendingShellCommand(shellId, initialCommand);
+  markAgentSpawned(shellId);
+  setStore(
+    produce((s) => {
+      const task = s.tasks[taskId];
+      if (!task) return;
+      task.shellAgentIds.push(shellId);
+    }),
+  );
+  return shellId;
+}
+
+/** Send a bookmark command to an existing idle shell, or spawn a new one. */
+export function runBookmarkInTask(taskId: string, command: string): void {
+  const task = store.tasks[taskId];
+  if (!task) return;
+
+  // Prefer the most-recently-created idle shell (sitting at a prompt).
+  for (let i = task.shellAgentIds.length - 1; i >= 0; i--) {
+    const shellId = task.shellAgentIds[i];
+    if (isAgentIdle(shellId)) {
+      // Mark busy immediately so rapid clicks don't reuse the same shell.
+      markAgentBusy(shellId);
+      setTaskFocusedPanel(taskId, `shell:${i}`);
+      invoke(IPC.WriteToAgent, { agentId: shellId, data: command + '\r' }).catch(() => {
+        spawnShellForTask(taskId, command);
+      });
+      return;
+    }
+  }
+
+  spawnShellForTask(taskId, command);
+}
+
+export async function closeShell(taskId: string, shellId: string): Promise<void> {
+  const closedIndex = store.tasks[taskId]?.shellAgentIds.indexOf(shellId) ?? -1;
+
+  await invoke(IPC.KillAgent, { agentId: shellId }).catch(() => {});
+  clearAgentActivity(shellId);
+  setStore(
+    produce((s) => {
+      const task = s.tasks[taskId];
+      if (task) {
+        task.shellAgentIds = task.shellAgentIds.filter((id) => id !== shellId);
+      }
+    }),
+  );
+
+  if (closedIndex >= 0) {
+    const remaining = store.tasks[taskId]?.shellAgentIds.length ?? 0;
+    if (remaining === 0) {
+      setTaskFocusedPanel(taskId, 'shell-toolbar:0');
+    } else {
+      const focusIndex = Math.min(closedIndex, remaining - 1);
+      setTaskFocusedPanel(taskId, `shell:${focusIndex}`);
+    }
+  }
+}
+
+export function hasDirectTask(projectId: string): boolean {
+  const allTaskIds = [...store.taskOrder, ...store.collapsedTaskOrder];
+  return allTaskIds.some((taskId) => {
+    const task = store.tasks[taskId];
+    return (
+      task &&
+      task.projectId === projectId &&
+      task.gitIsolation === 'direct' &&
+      task.closingStatus !== 'removing'
+    );
+  });
+}
+
+export async function collapseTask(taskId: string): Promise<void> {
+  const task = store.tasks[taskId];
+  if (!task || task.collapsed || task.closingStatus) return;
+
+  // Stop file watchers to prevent FSWatcher leak
+  invoke(IPC.StopPlanWatcher, { taskId }).catch(console.error);
+  invoke(IPC.StopStepsWatcher, { taskId }).catch(console.error);
+
+  // Save agent def before killing so uncollapse can restart cleanly.
+  // Collapsing unmounts the TaskPanel which destroys the TerminalView,
+  // so agents must be killed explicitly to avoid orphaned PTY processes.
+  const firstAgent = task.agentIds[0] ? store.agents[task.agentIds[0]] : null;
+  const agentDef = firstAgent?.def;
+  const agentIds = [...task.agentIds];
+  const shellAgentIds = [...task.shellAgentIds];
+  const allIds = [...agentIds, ...shellAgentIds];
+  await Promise.allSettled(
+    allIds.map((id) => invoke(IPC.KillAgent, { agentId: id }).catch(console.error)),
+  );
+  for (const id of allIds) clearAgentActivity(id);
+
+  setStore(
+    produce((s) => {
+      if (!s.tasks[taskId]) return;
+      s.tasks[taskId].collapsed = true;
+      s.tasks[taskId].savedAgentDef = agentDef;
+      s.tasks[taskId].agentIds = [];
+      s.tasks[taskId].shellAgentIds = [];
+      const idx = s.taskOrder.indexOf(taskId);
+      if (idx !== -1) s.taskOrder.splice(idx, 1);
+      s.collapsedTaskOrder.push(taskId);
+
+      // Clean up agent entries
+      for (const agentId of agentIds) {
+        delete s.agents[agentId];
+      }
+
+      // Switch active task to neighbor
+      if (s.activeTaskId === taskId) {
+        const neighbor = s.taskOrder[Math.max(0, idx - 1)] ?? null;
+        s.activeTaskId = neighbor;
+        const neighborTask = neighbor ? s.tasks[neighbor] : null;
+        s.activeAgentId = neighborTask?.agentIds[0] ?? null;
+      }
+    }),
+  );
+
+  rescheduleTaskStatusPolling();
+}
+
+export function uncollapseTask(taskId: string): void {
+  const task = store.tasks[taskId];
+  if (!task || !task.collapsed) return;
+
+  const savedDef = task.savedAgentDef;
+  const agentId = savedDef ? crypto.randomUUID() : null;
+
+  setStore(
+    produce((s) => {
+      const t = s.tasks[taskId];
+      t.collapsed = false;
+      s.collapsedTaskOrder = s.collapsedTaskOrder.filter((id) => id !== taskId);
+      s.taskOrder.push(taskId);
+      s.activeTaskId = taskId;
+
+      if (agentId && savedDef) {
+        const agent: Agent = {
+          id: agentId,
+          taskId,
+          def: savedDef,
+          resumed: true,
+          status: 'running',
+          exitCode: null,
+          signal: null,
+          lastOutput: [],
+          generation: 0,
+        };
+        s.agents[agentId] = agent;
+        t.agentIds = [agentId];
+        t.savedAgentDef = undefined;
+      }
+
+      s.activeAgentId = t.agentIds[0] ?? null;
+    }),
+  );
+
+  if (agentId) {
+    markAgentSpawned(agentId);
+    rescheduleTaskStatusPolling();
+  }
+}
+
+// --- GitHub drop-to-create helpers ---
+
+/** Find best matching project by comparing repo name to project directory basenames. */
+function matchProject(repoName: string): string | null {
+  const lower = repoName.toLowerCase();
+  for (const project of store.projects) {
+    const basename = project.path.split('/').pop() ?? '';
+    if (basename.toLowerCase() === lower) return project.id;
+  }
+  return null;
+}
+
+/** Derive dialog defaults (name, matched project) from a GitHub URL. */
+export function getGitHubDropDefaults(
+  url: string,
+): { name: string; projectId: string | null } | null {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) return null;
+  return {
+    name: taskNameFromGitHubUrl(parsed),
+    projectId: matchProject(parsed.repo),
+  };
+}
+
+export function setNewTaskDropUrl(url: string): void {
+  setStore('newTaskDropUrl', url);
+}
+
+export function setNewTaskPrefillPrompt(prompt: string, projectId: string | null): void {
+  setStore('newTaskPrefillPrompt', { prompt, projectId });
+}
+
+export function setPlanContent(
+  taskId: string,
+  content: string | null,
+  fileName: string | null,
+): void {
+  setStore('tasks', taskId, 'planContent', content ?? undefined);
+  setStore('tasks', taskId, 'planFileName', fileName ?? undefined);
+}
+
+export function setStepsContent(taskId: string, steps: unknown[] | null): void {
+  const valid = steps
+    ? (steps.filter((s) => s !== null && typeof s === 'object' && !Array.isArray(s)) as StepEntry[])
+    : [];
+  setStore('tasks', taskId, 'stepsContent', valid.length > 0 ? valid : undefined);
+}
+
+export function setTaskLastInputAt(taskId: string): void {
+  setStore('tasks', taskId, 'lastInputAt', new Date().toISOString());
+}
+
+/** Toggles steps tracking for a task and remembers the choice as the new default. */
+export function setTaskStepsEnabled(taskId: string, enabled: boolean): void {
+  setStore('tasks', taskId, 'stepsEnabled', enabled || undefined);
+  setStore('showSteps', enabled); // remember as default for future tasks
+}

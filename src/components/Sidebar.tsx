@@ -1,0 +1,1008 @@
+import { createSignal, createEffect, createMemo, onMount, onCleanup, For, Show } from 'solid-js';
+import {
+  store,
+  pickAndAddProject,
+  removeProject,
+  removeProjectWithTasks,
+  toggleNewTaskDialog,
+  setActiveTask,
+  toggleSidebar,
+  reorderTask,
+  getTaskDotStatus,
+  getTaskAttentionState,
+  getTaskViewportVisibility,
+  registerFocusFn,
+  unregisterFocusFn,
+  focusSidebar,
+  unfocusSidebar,
+  setTaskFocusedPanel,
+  getTaskFocusedPanel,
+  getPanelSize,
+  setPanelSizes,
+  toggleSettingsDialog,
+  uncollapseTask,
+  isProjectMissing,
+  showNotification,
+} from '../store/store';
+import type { Project } from '../store/types';
+import type { TaskAttentionState } from '../store/store';
+import { computeGroupedTasks } from '../store/sidebar-order';
+import { ConnectPhoneModal } from './ConnectPhoneModal';
+import { ConfirmDialog } from './ConfirmDialog';
+import { EditProjectDialog } from './EditProjectDialog';
+import { ImportWorktreesDialog } from './ImportWorktreesDialog';
+import { SidebarFooter } from './SidebarFooter';
+import { SessionsHistoryPanel } from './SessionsHistoryPanel';
+import { IconButton } from './IconButton';
+import { StatusDot } from './StatusDot';
+import { theme } from '../lib/theme';
+import { sf } from '../lib/fontScale';
+import { mod } from '../lib/platform';
+import { invoke } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
+import type { ImportableWorktree } from '../ipc/types';
+
+const DRAG_THRESHOLD = 5;
+const SIDEBAR_DEFAULT_WIDTH = 240;
+const SIDEBAR_MIN_WIDTH = 160;
+const SIDEBAR_MAX_WIDTH = 480;
+const SIDEBAR_SIZE_KEY = 'sidebar:width';
+
+function getAttentionColor(attention: TaskAttentionState): string | null {
+  if (attention === 'active') return theme.accent;
+  if (attention === 'needs_input') return theme.warning;
+  if (attention === 'error') return theme.error;
+  return null;
+}
+
+interface OffscreenAttentionInfo {
+  attention: TaskAttentionState;
+  color: string;
+  label: string | null;
+}
+
+function getOffscreenAttentionInfo(taskId: string): OffscreenAttentionInfo | null {
+  const visibility = getTaskViewportVisibility(taskId);
+  if (!visibility || visibility === 'visible') return null;
+  const attention = getTaskAttentionState(taskId);
+  if (attention === 'idle' || attention === 'ready') return null;
+  const color = getAttentionColor(attention) ?? theme.accent;
+  const side = visibility === 'offscreen-left' ? 'left' : 'right';
+  const prefix = visibility === 'offscreen-left' ? '←' : '→';
+  let label: string | null = null;
+  if (attention === 'needs_input') label = `${prefix} input (${side})`;
+  if (attention === 'error') label = `${prefix} error (${side})`;
+  return { attention, color, label };
+}
+
+function createOffscreenAttentionState(taskId: () => string) {
+  const info = createMemo(() => getOffscreenAttentionInfo(taskId()));
+  return {
+    hasAttention: () => info() !== null,
+    attention: () => info()?.attention,
+    color: () => info()?.color ?? theme.accent,
+    label: () => info()?.label ?? null,
+  };
+}
+
+export function Sidebar() {
+  const [confirmRemove, setConfirmRemove] = createSignal<string | null>(null);
+  const [editingProject, setEditingProject] = createSignal<Project | null>(null);
+  const [showConnectPhone, setShowConnectPhone] = createSignal(false);
+  const [showSessionsHistory, setShowSessionsHistory] = createSignal(false);
+  const [importProject, setImportProject] = createSignal<Project | null>(null);
+  const [initialImportCandidates, setInitialImportCandidates] = createSignal<
+    ImportableWorktree[] | null
+  >(null);
+  const [dragFromIndex, setDragFromIndex] = createSignal<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = createSignal<number | null>(null);
+  const [resizing, setResizing] = createSignal(false);
+  let taskListRef: HTMLDivElement | undefined;
+
+  const sidebarWidth = () => getPanelSize(SIDEBAR_SIZE_KEY) ?? SIDEBAR_DEFAULT_WIDTH;
+  const taskIndexById = createMemo(() => {
+    const map = new Map<string, number>();
+    store.taskOrder.forEach((taskId, idx) => map.set(taskId, idx));
+    return map;
+  });
+  const groupedTasks = createMemo(() => computeGroupedTasks());
+  function handleResizeMouseDown(e: MouseEvent) {
+    e.preventDefault();
+    setResizing(true);
+    const startX = e.clientX;
+    const startWidth = sidebarWidth();
+
+    function onMove(ev: MouseEvent) {
+      const newWidth = Math.max(
+        SIDEBAR_MIN_WIDTH,
+        Math.min(SIDEBAR_MAX_WIDTH, startWidth + ev.clientX - startX),
+      );
+      setPanelSizes({ [SIDEBAR_SIZE_KEY]: newWidth });
+    }
+
+    function onUp() {
+      setResizing(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  onMount(() => {
+    // Attach mousedown on task list container via native listener
+    const el = taskListRef;
+    if (el) {
+      const handler = (e: MouseEvent) => {
+        const target = (e.target as HTMLElement).closest<HTMLElement>('[data-task-index]');
+        if (!target) return;
+        const index = Number(target.dataset.taskIndex);
+        const taskId = store.taskOrder[index];
+        if (taskId === undefined || taskId === null) return;
+        handleTaskMouseDown(e, taskId, index);
+      };
+      el.addEventListener('mousedown', handler);
+      onCleanup(() => el.removeEventListener('mousedown', handler));
+    }
+
+    // Register sidebar focus
+    registerFocusFn('sidebar', () => taskListRef?.focus());
+    onCleanup(() => unregisterFocusFn('sidebar'));
+  });
+
+  // When sidebarFocused changes, trigger focus
+  createEffect(() => {
+    if (store.sidebarFocused) {
+      taskListRef?.focus();
+    }
+  });
+
+  // Scroll the active task into view when it changes
+  createEffect(() => {
+    const activeId = store.activeTaskId;
+    if (!activeId || !taskListRef) return;
+    const idx = taskIndexById().get(activeId);
+    if (idx === undefined) return;
+    const el = taskListRef.querySelector<HTMLElement>(
+      `[data-task-index="${CSS.escape(String(idx))}"]`,
+    );
+    el?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  });
+
+  // Scroll the focused task into view when navigating via keyboard
+  createEffect(() => {
+    const focusedId = store.sidebarFocusedTaskId;
+    if (!focusedId || !taskListRef) return;
+    const idx = taskIndexById().get(focusedId);
+    const el =
+      idx !== undefined
+        ? taskListRef.querySelector<HTMLElement>(`[data-task-index="${CSS.escape(String(idx))}"]`)
+        : taskListRef.querySelector<HTMLElement>(
+            `[data-sidebar-task-id="${CSS.escape(focusedId)}"]`,
+          );
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  });
+
+  // Scroll the focused project into view when it changes
+  createEffect(() => {
+    const projectId = store.sidebarFocusedProjectId;
+    if (!projectId) return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-project-id="${CSS.escape(projectId)}"]`,
+      );
+      el?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    });
+  });
+
+  async function handleAddProject() {
+    const projectId = await pickAndAddProject();
+    if (!projectId) return;
+
+    const project = store.projects.find((entry) => entry.id === projectId) ?? null;
+    if (!project) return;
+
+    try {
+      const candidates = await invoke<ImportableWorktree[]>(IPC.ListImportableWorktrees, {
+        projectRoot: project.path,
+      });
+      if (candidates.length > 0) {
+        setInitialImportCandidates(candidates);
+        setImportProject(project);
+      }
+    } catch (err) {
+      console.error('Failed to scan importable worktrees:', err);
+      showNotification(
+        `Couldn't scan existing worktrees: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  function computeDropIndex(clientY: number, fromIdx: number): number {
+    if (!taskListRef) return fromIdx;
+    const items = taskListRef.querySelectorAll<HTMLElement>('[data-task-index]');
+    for (let i = 0; i < items.length; i++) {
+      const rect = items[i].getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (clientY < midY) return i;
+    }
+    return items.length;
+  }
+
+  function handleTaskMouseDown(e: MouseEvent, taskId: string, index: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+
+    function onMove(ev: MouseEvent) {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!dragging && Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD) return;
+
+      if (!dragging) {
+        dragging = true;
+        setDragFromIndex(index);
+        document.body.classList.add('dragging-task');
+      }
+
+      const dropIdx = computeDropIndex(ev.clientY, index);
+      setDropTargetIndex(dropIdx);
+    }
+
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+
+      if (dragging) {
+        document.body.classList.remove('dragging-task');
+        const from = dragFromIndex();
+        const to = dropTargetIndex();
+        setDragFromIndex(null);
+        setDropTargetIndex(null);
+
+        if (from !== null && to !== null && from !== to) {
+          const adjustedTo = to > from ? to - 1 : to;
+          reorderTask(from, adjustedTo);
+        }
+      } else {
+        setActiveTask(taskId);
+        focusSidebar();
+      }
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  function abbreviatePath(path: string): string {
+    // Handle Linux /home/user/... and macOS /Users/user/...
+    const prefixes = ['/home/', '/Users/'];
+    for (const prefix of prefixes) {
+      if (path.startsWith(prefix)) {
+        const rest = path.slice(prefix.length);
+        const slashIdx = rest.indexOf('/');
+        if (slashIdx !== -1) return '~' + rest.slice(slashIdx);
+        return '~';
+      }
+    }
+    return path;
+  }
+
+  // Compute the global taskOrder index for a given task
+  function globalIndex(taskId: string): number {
+    return taskIndexById().get(taskId) ?? -1;
+  }
+
+  let sidebarRef!: HTMLDivElement;
+
+  return (
+    <div
+      ref={sidebarRef}
+      style={{
+        width: `${sidebarWidth()}px`,
+        'min-width': `${SIDEBAR_MIN_WIDTH}px`,
+        'max-width': `${SIDEBAR_MAX_WIDTH}px`,
+        display: 'flex',
+        'flex-shrink': '0',
+        'user-select': resizing() ? 'none' : undefined,
+      }}
+    >
+      <div
+        style={{
+          flex: '1',
+          'min-width': '0',
+          display: 'flex',
+          'flex-direction': 'column',
+          padding: '16px',
+          gap: '16px',
+          'user-select': 'none',
+          position: 'relative',
+        }}
+      >
+        {/* Logo + collapse */}
+        <div
+          style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between' }}
+        >
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '0 2px' }}>
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 56 56"
+              fill="none"
+              stroke={theme.fg}
+              stroke-width="4"
+              style={{ 'flex-shrink': '0' }}
+            >
+              <line x1="10" y1="6" x2="10" y2="50" />
+              <line x1="22" y1="6" x2="22" y2="50" />
+              <path d="M30 8 H47 V24 H30" />
+              <path d="M49 32 H32 V48 H49" />
+            </svg>
+            <span
+              style={{
+                'font-size': sf(15),
+                'font-weight': '600',
+                color: theme.fg,
+                'font-family': "'JetBrains Mono', monospace",
+              }}
+            >
+              ParallelCode
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1Zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Zm.75 2.75v3.5l2.25 1.3-.65 1.12-2.85-1.65V5.25h1.25Z" />
+                </svg>
+              }
+              onClick={() => setShowSessionsHistory((v) => !v)}
+              title="Session History"
+            />
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 2.25a.75.75 0 0 1 .73.56l.2.72a4.48 4.48 0 0 1 1.04.43l.66-.37a.75.75 0 0 1 .9.13l.75.75a.75.75 0 0 1 .13.9l-.37.66c.17.33.31.68.43 1.04l.72.2a.75.75 0 0 1 .56.73v1.06a.75.75 0 0 1-.56.73l-.72.2a4.48 4.48 0 0 1-.43 1.04l.37.66a.75.75 0 0 1-.13.9l-.75.75a.75.75 0 0 1-.9.13l-.66-.37a4.48 4.48 0 0 1-1.04.43l-.2.72a.75.75 0 0 1-.73.56H6.94a.75.75 0 0 1-.73-.56l-.2-.72a4.48 4.48 0 0 1-1.04-.43l-.66.37a.75.75 0 0 1-.9-.13l-.75-.75a.75.75 0 0 1-.13-.9l.37-.66a4.48 4.48 0 0 1-.43-1.04l-.72-.2a.75.75 0 0 1-.56-.73V7.47a.75.75 0 0 1 .56-.73l.72-.2c.11-.36.26-.71.43-1.04l-.37-.66a.75.75 0 0 1 .13-.9l.75-.75a.75.75 0 0 1 .9-.13l.66.37c.33-.17.68-.31 1.04-.43l.2-.72a.75.75 0 0 1 .73-.56H8Zm-.53 3.22a2.5 2.5 0 1 0 1.06 4.88 2.5 2.5 0 0 0-1.06-4.88Z" />
+                </svg>
+              }
+              onClick={() => toggleSettingsDialog(true)}
+              title={`Settings (${mod}+,)`}
+            />
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M9.78 12.78a.75.75 0 0 1-1.06 0L4.47 8.53a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L6.06 8l3.72 3.72a.75.75 0 0 1 0 1.06Z" />
+                </svg>
+              }
+              onClick={() => toggleSidebar()}
+              title={`Collapse sidebar (${mod}+B)`}
+            />
+          </div>
+        </div>
+
+        {/* Projects section */}
+        <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
+          <div
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'space-between',
+              padding: '0 2px',
+            }}
+          >
+            <label
+              style={{
+                'font-size': sf(12),
+                color: theme.fgMuted,
+                'text-transform': 'uppercase',
+                'letter-spacing': '0.05em',
+              }}
+            >
+              Projects
+            </label>
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z" />
+                </svg>
+              }
+              onClick={() => handleAddProject()}
+              title="Add project"
+              size="sm"
+            />
+          </div>
+
+          <For each={store.projects}>
+            {(project) => (
+              <div
+                role="button"
+                tabIndex={0}
+                data-project-id={project.id}
+                onClick={() => setEditingProject(project)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setEditingProject(project);
+                }}
+                style={{
+                  display: 'flex',
+                  'align-items': 'center',
+                  gap: '6px',
+                  padding: '4px 6px',
+                  'border-radius': '6px',
+                  background: isProjectMissing(project.id)
+                    ? `color-mix(in srgb, ${theme.warning} 8%, ${theme.bgInput})`
+                    : theme.bgInput,
+                  'font-size': sf(12),
+                  cursor: 'pointer',
+                  border:
+                    store.sidebarFocused && store.sidebarFocusedProjectId === project.id
+                      ? `1.5px solid var(--border-focus)`
+                      : '1.5px solid transparent',
+                }}
+              >
+                <div
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    'border-radius': '50%',
+                    background: project.color,
+                    'flex-shrink': '0',
+                  }}
+                />
+                <div style={{ flex: '1', 'min-width': '0', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      color: theme.fg,
+                      'font-weight': '500',
+                      'white-space': 'nowrap',
+                      overflow: 'hidden',
+                      'text-overflow': 'ellipsis',
+                    }}
+                  >
+                    {project.name}
+                  </div>
+                  <div
+                    style={{
+                      color: isProjectMissing(project.id) ? theme.warning : theme.fgSubtle,
+                      'font-size': sf(11),
+                      'white-space': 'nowrap',
+                      overflow: 'hidden',
+                      'text-overflow': 'ellipsis',
+                    }}
+                  >
+                    {isProjectMissing(project.id)
+                      ? 'Folder not found'
+                      : abbreviatePath(project.path)}
+                  </div>
+                </div>
+                <button
+                  class="icon-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmRemove(project.id);
+                  }}
+                  title="Remove project"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: theme.fgSubtle,
+                    cursor: 'pointer',
+                    'font-size': sf(13),
+                    'line-height': '1',
+                    padding: '0 2px',
+                    'flex-shrink': '0',
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+          </For>
+
+          <Show when={store.projects.length === 0}>
+            <span style={{ 'font-size': sf(11), color: theme.fgSubtle, padding: '0 2px' }}>
+              No projects linked yet.
+            </span>
+          </Show>
+        </div>
+
+        <div style={{ height: '1px', background: theme.border }} />
+
+        {/* New task / Link project button */}
+        <Show
+          when={store.projects.length > 0}
+          fallback={
+            <button
+              class="icon-btn"
+              onClick={() => handleAddProject()}
+              style={{
+                background: 'transparent',
+                border: `1px solid ${theme.border}`,
+                'border-radius': '8px',
+                padding: '8px 14px',
+                color: theme.fgMuted,
+                cursor: 'pointer',
+                'font-size': sf(13),
+                'font-weight': '500',
+                display: 'flex',
+                'align-items': 'center',
+                'justify-content': 'center',
+                gap: '6px',
+                width: '100%',
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.22.78 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2A1.75 1.75 0 0 0 5 1H1.75Z" />
+              </svg>
+              Link Project
+            </button>
+          }
+        >
+          <button
+            class="icon-btn"
+            onClick={() => toggleNewTaskDialog(true)}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${theme.border}`,
+              'border-radius': '8px',
+              padding: '8px 14px',
+              color: theme.fgMuted,
+              cursor: 'pointer',
+              'font-size': sf(13),
+              'font-weight': '500',
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'center',
+              gap: '6px',
+              width: '100%',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z" />
+            </svg>
+            New Task
+          </button>
+        </Show>
+
+        {/* Tasks grouped by project */}
+        <div
+          ref={taskListRef}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (!store.sidebarFocused) return;
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const focusedProjectId = store.sidebarFocusedProjectId;
+              if (focusedProjectId) {
+                const project = store.projects.find((p) => p.id === focusedProjectId);
+                if (project) setEditingProject(project);
+                return;
+              }
+              const taskId = store.sidebarFocusedTaskId;
+              if (taskId) {
+                if (store.tasks[taskId]?.collapsed) {
+                  uncollapseTask(taskId);
+                } else {
+                  setActiveTask(taskId);
+                  unfocusSidebar();
+                  setTaskFocusedPanel(taskId, getTaskFocusedPanel(taskId));
+                }
+              }
+            }
+          }}
+          style={{
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '1px',
+            flex: '1',
+            overflow: 'auto',
+            outline: 'none',
+          }}
+        >
+          <For each={store.projects}>
+            {(project) => {
+              const group = () => groupedTasks().grouped[project.id];
+              const activeTasks = () => group()?.active ?? [];
+              const collapsedTasks = () => group()?.collapsed ?? [];
+              const totalCount = () => activeTasks().length + collapsedTasks().length;
+              return (
+                <Show when={totalCount() > 0}>
+                  <span
+                    style={{
+                      'font-size': sf(11),
+                      color: theme.fgSubtle,
+                      'text-transform': 'uppercase',
+                      'letter-spacing': '0.05em',
+                      'margin-top': '8px',
+                      'margin-bottom': '4px',
+                      padding: '0 2px',
+                      display: 'flex',
+                      'align-items': 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        'border-radius': '50%',
+                        background: project.color,
+                        'flex-shrink': '0',
+                      }}
+                    />
+                    {project.name} ({totalCount()})
+                  </span>
+                  <For each={activeTasks()}>
+                    {(taskId) => (
+                      <TaskRow
+                        taskId={taskId}
+                        globalIndex={globalIndex}
+                        dragFromIndex={dragFromIndex}
+                        dropTargetIndex={dropTargetIndex}
+                      />
+                    )}
+                  </For>
+                  <For each={collapsedTasks()}>
+                    {(taskId) => <CollapsedTaskRow taskId={taskId} />}
+                  </For>
+                </Show>
+              );
+            }}
+          </For>
+
+          {/* Orphaned tasks (no matching project) */}
+          <Show
+            when={
+              groupedTasks().orphanedActive.length + groupedTasks().orphanedCollapsed.length > 0
+            }
+          >
+            <span
+              style={{
+                'font-size': sf(11),
+                color: theme.fgSubtle,
+                'text-transform': 'uppercase',
+                'letter-spacing': '0.05em',
+                'margin-top': '8px',
+                'margin-bottom': '4px',
+                padding: '0 2px',
+              }}
+            >
+              Other (
+              {groupedTasks().orphanedActive.length + groupedTasks().orphanedCollapsed.length})
+            </span>
+            <For each={groupedTasks().orphanedActive}>
+              {(taskId) => (
+                <TaskRow
+                  taskId={taskId}
+                  globalIndex={globalIndex}
+                  dragFromIndex={dragFromIndex}
+                  dropTargetIndex={dropTargetIndex}
+                />
+              )}
+            </For>
+            <For each={groupedTasks().orphanedCollapsed}>
+              {(taskId) => <CollapsedTaskRow taskId={taskId} />}
+            </For>
+          </Show>
+
+          <Show when={dropTargetIndex() === store.taskOrder.length}>
+            <div class="drop-indicator" />
+          </Show>
+        </div>
+
+        {/* Connect / Disconnect Phone button */}
+        {(() => {
+          const connected = () =>
+            store.remoteAccess.enabled && store.remoteAccess.connectedClients > 0;
+          const accent = () => (connected() ? theme.success : theme.fgMuted);
+          return (
+            <button
+              onClick={() => setShowConnectPhone(true)}
+              style={{
+                display: 'flex',
+                'align-items': 'center',
+                gap: '8px',
+                padding: '8px 12px',
+                margin: '4px 8px',
+                background: 'transparent',
+                border: `1px solid ${connected() ? theme.success : theme.border}`,
+                'border-radius': '8px',
+                color: accent(),
+                'font-size': sf(13),
+                cursor: 'pointer',
+                'flex-shrink': '0',
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={accent()}
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                <line x1="12" y1="18" x2="12.01" y2="18" />
+              </svg>
+              {connected() ? 'Phone Connected' : 'Connect Phone'}
+            </button>
+          );
+        })()}
+
+        {/* Sessions history overlay — slides over the sidebar content */}
+        <Show when={showSessionsHistory()}>
+          <div
+            style={{
+              position: 'absolute',
+              inset: '0',
+              background: 'var(--bg)',
+              'z-index': '10',
+              display: 'flex',
+              'flex-direction': 'column',
+              overflow: 'hidden',
+              'border-radius': 'var(--island-radius, 8px)',
+            }}
+          >
+            <SessionsHistoryPanel onClose={() => setShowSessionsHistory(false)} />
+          </div>
+        </Show>
+
+        <SidebarFooter />
+
+        <ConnectPhoneModal open={showConnectPhone()} onClose={() => setShowConnectPhone(false)} />
+
+        {/* Edit project dialog */}
+        <EditProjectDialog project={editingProject()} onClose={() => setEditingProject(null)} />
+        <ImportWorktreesDialog
+          open={importProject() !== null}
+          project={importProject()}
+          initialCandidates={initialImportCandidates()}
+          onClose={() => {
+            setImportProject(null);
+            setInitialImportCandidates(null);
+          }}
+        />
+
+        {/* Confirm remove project dialog */}
+        {(() => {
+          const id = confirmRemove();
+          const taskCount = id
+            ? [...store.taskOrder, ...store.collapsedTaskOrder].filter(
+                (tid) => store.tasks[tid]?.projectId === id,
+              ).length
+            : 0;
+          return (
+            <ConfirmDialog
+              open={id !== null}
+              title="Remove project?"
+              message={
+                taskCount > 0
+                  ? `This project has ${taskCount} open task(s). Removing it will also close all tasks, delete their worktrees and branches.`
+                  : 'Are you sure you want to remove this project?'
+              }
+              confirmLabel={taskCount > 0 ? 'Remove all' : 'Remove'}
+              danger
+              onConfirm={() => {
+                if (id) {
+                  if (taskCount > 0) {
+                    removeProjectWithTasks(id);
+                  } else {
+                    removeProject(id);
+                  }
+                }
+                setConfirmRemove(null);
+              }}
+              onCancel={() => setConfirmRemove(null)}
+            />
+          );
+        })()}
+      </div>
+      {/* Resize handle */}
+      <div
+        class={`resize-handle resize-handle-h${resizing() ? ' dragging' : ''}`}
+        onMouseDown={handleResizeMouseDown}
+      />
+    </div>
+  );
+}
+
+function CurrentBranchBadge(props: { branchName: string }) {
+  return (
+    <span
+      style={{
+        'font-size': sf(11),
+        'font-weight': '600',
+        padding: '1px 5px',
+        'border-radius': '3px',
+        background: `color-mix(in srgb, ${theme.warning} 12%, transparent)`,
+        color: theme.warning,
+        'flex-shrink': '0',
+        'line-height': '1.5',
+      }}
+    >
+      {props.branchName}
+    </span>
+  );
+}
+
+function OffscreenAttentionBadge(props: { taskId: string }) {
+  const offscreenAttention = createOffscreenAttentionState(() => props.taskId);
+  return (
+    <Show when={offscreenAttention.label()}>
+      {(text) => (
+        <span
+          class="sidebar-offscreen-attention-badge"
+          title={text()}
+          style={{
+            color: offscreenAttention.color(),
+            border: `1px solid color-mix(in srgb, ${offscreenAttention.color()} 30%, transparent)`,
+            background: `color-mix(in srgb, ${offscreenAttention.color()} 10%, transparent)`,
+          }}
+        >
+          {text()}
+        </span>
+      )}
+    </Show>
+  );
+}
+
+function CollapsedTaskRow(props: { taskId: string }) {
+  const task = () => store.tasks[props.taskId];
+  const offscreenAttention = createOffscreenAttentionState(() => props.taskId);
+  return (
+    <Show when={task()}>
+      {(t) => (
+        <div
+          class="task-item task-item-appearing"
+          role="button"
+          tabIndex={0}
+          data-sidebar-task-id={props.taskId}
+          onClick={() => uncollapseTask(props.taskId)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              uncollapseTask(props.taskId);
+            }
+          }}
+          title="Click to restore"
+          style={{
+            padding: '7px 10px',
+            'border-radius': '6px',
+            background: offscreenAttention.hasAttention()
+              ? `color-mix(in srgb, ${offscreenAttention.color()} 10%, transparent)`
+              : 'transparent',
+            color: offscreenAttention.hasAttention() ? theme.fg : theme.fgSubtle,
+            'font-size': sf(13),
+            'font-weight': '400',
+            cursor: 'pointer',
+            'white-space': 'nowrap',
+            overflow: 'hidden',
+            'text-overflow': 'ellipsis',
+            opacity: offscreenAttention.hasAttention() ? '1' : '0.6',
+            display: 'flex',
+            'align-items': 'center',
+            gap: '6px',
+            border:
+              store.sidebarFocused && store.sidebarFocusedTaskId === props.taskId
+                ? `1.5px solid var(--border-focus)`
+                : offscreenAttention.hasAttention()
+                  ? `1.5px solid color-mix(in srgb, ${offscreenAttention.color()} 38%, transparent)`
+                  : '1.5px solid transparent',
+          }}
+        >
+          <StatusDot
+            status={getTaskDotStatus(props.taskId)}
+            size="sm"
+            attention={offscreenAttention.attention()}
+          />
+          <Show when={t().gitIsolation === 'direct'}>
+            <CurrentBranchBadge branchName={t().branchName} />
+          </Show>
+          <span style={{ flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
+            {t().name}
+          </span>
+          <OffscreenAttentionBadge taskId={props.taskId} />
+        </div>
+      )}
+    </Show>
+  );
+}
+
+interface TaskRowProps {
+  taskId: string;
+  globalIndex: (taskId: string) => number;
+  dragFromIndex: () => number | null;
+  dropTargetIndex: () => number | null;
+}
+
+function TaskRow(props: TaskRowProps) {
+  const task = () => store.tasks[props.taskId];
+  const idx = () => props.globalIndex(props.taskId);
+  const offscreenAttention = createOffscreenAttentionState(() => props.taskId);
+  return (
+    <Show when={task()}>
+      {(t) => (
+        <>
+          <Show when={props.dropTargetIndex() === idx()}>
+            <div class="drop-indicator" />
+          </Show>
+          <div
+            class={`task-item${t().closingStatus === 'removing' ? ' task-item-removing' : ' task-item-appearing'}`}
+            data-task-index={idx()}
+            onClick={() => {
+              setActiveTask(props.taskId);
+              focusSidebar();
+            }}
+            style={{
+              padding: '7px 10px',
+              'border-radius': '6px',
+              background: offscreenAttention.hasAttention()
+                ? `color-mix(in srgb, ${offscreenAttention.color()} 10%, transparent)`
+                : 'transparent',
+              color:
+                store.activeTaskId === props.taskId || offscreenAttention.hasAttention()
+                  ? theme.fg
+                  : theme.fgMuted,
+              'font-size': sf(13),
+              'font-weight':
+                store.activeTaskId === props.taskId || offscreenAttention.hasAttention()
+                  ? '500'
+                  : '400',
+              cursor: props.dragFromIndex() !== null ? 'grabbing' : 'pointer',
+              'white-space': 'nowrap',
+              overflow: 'hidden',
+              'text-overflow': 'ellipsis',
+              opacity: props.dragFromIndex() === idx() ? '0.4' : '1',
+              display: 'flex',
+              'align-items': 'center',
+              gap: '6px',
+              border:
+                store.sidebarFocused && store.sidebarFocusedTaskId === props.taskId
+                  ? `1.5px solid var(--border-focus)`
+                  : offscreenAttention.hasAttention()
+                    ? `1.5px solid color-mix(in srgb, ${offscreenAttention.color()} 38%, transparent)`
+                    : '1.5px solid transparent',
+            }}
+          >
+            <StatusDot
+              status={getTaskDotStatus(props.taskId)}
+              size="sm"
+              attention={offscreenAttention.attention()}
+            />
+            <Show when={t().gitIsolation === 'direct'}>
+              <span
+                style={{
+                  'font-size': sf(11),
+                  'font-weight': '600',
+                  padding: '1px 5px',
+                  'border-radius': '3px',
+                  background: `color-mix(in srgb, ${theme.warning} 12%, transparent)`,
+                  color: theme.warning,
+                  'flex-shrink': '0',
+                  'line-height': '1.5',
+                }}
+              >
+                {t().branchName}
+              </span>
+            </Show>
+            <span style={{ flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
+              {t().name}
+            </span>
+            <OffscreenAttentionBadge taskId={props.taskId} />
+          </div>
+        </>
+      )}
+    </Show>
+  );
+}

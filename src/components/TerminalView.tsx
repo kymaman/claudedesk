@@ -1,0 +1,604 @@
+import { onMount, onCleanup, createEffect } from 'solid-js';
+import { Terminal, type IMarker } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { invoke, fireAndForget, Channel } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
+import { getTerminalFontFamily } from '../lib/fonts';
+import { TERMINAL_SCROLLBACK_LINES } from '../lib/terminalConstants';
+import { getTerminalTheme } from '../lib/theme';
+import { matchesGlobalShortcut } from '../lib/shortcuts';
+import { isMac } from '../lib/platform';
+import { resolvedBindings } from '../store/keybindings';
+import { matchesKeyEvent } from '../lib/keybindings';
+import { store, setTaskLastInputAt } from '../store/store';
+import { terminalDefaults } from '../store/terminal-defaults';
+import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
+import type { PtyOutput } from '../ipc/types';
+
+// Pre-computed base64 lookup table — avoids atob() intermediate string allocation.
+const B64_LOOKUP = new Uint8Array(128);
+for (let i = 0; i < 64; i++) {
+  B64_LOOKUP['ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.charCodeAt(i)] = i;
+}
+
+function base64ToUint8Array(b64: string): Uint8Array {
+  let end = b64.length;
+  while (end > 0 && b64.charCodeAt(end - 1) === 61 /* '=' */) end--;
+  const out = new Uint8Array((end * 3) >>> 2);
+  let j = 0;
+  for (let i = 0; i < end; ) {
+    const a = B64_LOOKUP[b64.charCodeAt(i++)];
+    const b = i < end ? B64_LOOKUP[b64.charCodeAt(i++)] : 0;
+    const c = i < end ? B64_LOOKUP[b64.charCodeAt(i++)] : 0;
+    const d = i < end ? B64_LOOKUP[b64.charCodeAt(i++)] : 0;
+    const triplet = (a << 18) | (b << 12) | (c << 6) | d;
+    out[j++] = (triplet >>> 16) & 0xff;
+    if (j < out.length) out[j++] = (triplet >>> 8) & 0xff;
+    if (j < out.length) out[j++] = triplet & 0xff;
+  }
+  return out;
+}
+
+interface TerminalViewProps {
+  taskId: string;
+  agentId: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  env?: Record<string, string>;
+  isShell?: boolean;
+  stepsEnabled?: boolean;
+  dockerMode?: boolean;
+  dockerImage?: string;
+  onExit?: (exitInfo: {
+    exit_code: number | null;
+    signal: string | null;
+    last_output: string[];
+  }) => void;
+  onData?: (data: Uint8Array) => void;
+  onPromptDetected?: (text: string) => void;
+  onFileLink?: (filePath: string) => void;
+  onReady?: (focusFn: () => void) => void;
+  onBufferReady?: (getBuffer: () => string) => void;
+  /** Exposes step-bookmark API: `mark(i)` registers a marker at the current line for
+   *  step index `i`; `jump(i)` scrolls the viewport so that marker is visible.
+   *  Called with `undefined` on unmount so the consumer can reset its state — important
+   *  on agent restart, where this component remounts but the parent does not. */
+  onStepNavReady?: (
+    api: { mark: (i: number) => void; jump: (i: number) => boolean } | undefined,
+  ) => void;
+  fontSize?: number;
+  autoFocus?: boolean;
+  initialCommand?: string;
+  isFocused?: boolean;
+}
+
+// Status parsing only needs recent output. Capping forwarded bytes avoids
+// expensive full-chunk decoding during large terminal bursts.
+const STATUS_ANALYSIS_MAX_BYTES = 8 * 1024;
+
+/** Terminal-layer bindings — filtered from resolved bindings.
+ *  Called in the key handler (hot path); resolveBindings walks the full
+ *  defaults list on each call, which is fine at human typing speed. */
+function getTerminalBindings() {
+  return resolvedBindings().filter((b) => b.layer === 'terminal');
+}
+
+export function TerminalView(props: TerminalViewProps) {
+  let containerRef!: HTMLDivElement;
+  let term: Terminal | undefined;
+  let fitAddon: FitAddon | undefined;
+  let webglAddon: WebglAddon | undefined;
+
+  onMount(() => {
+    // Capture props eagerly so cleanup/callbacks always use the original values
+    const taskId = props.taskId;
+    const agentId = props.agentId;
+    const initialFontSize = props.fontSize ?? 13;
+
+    // Fire-and-forget font preload. xterm's canvas renderer measures glyph
+    // widths once at init — if the webfont (incl. Cyrillic subset) hasn't
+    // arrived yet, Russian characters fall back per-glyph and jitter vertically.
+    // Loading both latin and cyrillic weight variants primes the FontFaceSet.
+    const fontName = store.terminalFont || 'JetBrains Mono';
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.load) {
+      void Promise.all([
+        document.fonts.load(`${initialFontSize}px "${fontName}"`, 'Aa'),
+        document.fonts.load(`${initialFontSize}px "${fontName}"`, 'Аа'),
+        document.fonts.load(`500 ${initialFontSize}px "${fontName}"`, 'Аа'),
+      ]).then(() => {
+        // Re-render terminal after fonts ready so glyph widths use the real font.
+        try {
+          term?.refresh(0, term.rows - 1);
+        } catch {
+          /* term may be disposed */
+        }
+      });
+    }
+
+    term = new Terminal({
+      cursorBlink: true,
+      fontSize: initialFontSize,
+      fontFamily: getTerminalFontFamily(store.terminalFont),
+      theme: getTerminalTheme(store.themePreset),
+      allowProposedApi: true,
+      scrollback: TERMINAL_SCROLLBACK_LINES,
+    });
+
+    fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        // Require Cmd+click (Mac) or Ctrl+click (Linux) to open links
+        if (!(isMac ? event.metaKey : event.ctrlKey)) return;
+        try {
+          const parsed = new URL(uri);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            window.open(uri, '_blank');
+          }
+        } catch {
+          // Invalid URL, ignore
+        }
+      }),
+    );
+
+    term.open(containerRef);
+
+    // File path link provider — makes file paths clickable in terminal output
+    // Must be registered after term.open() so the DOM is available.
+    term.registerLinkProvider({
+      provideLinks(y, callback) {
+        if (!term) {
+          callback(undefined);
+          return;
+        }
+        const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? '';
+        // Match file paths: absolute, ./ or ../ relative, and bare relative with /
+        // Supports @scoped packages, line:col suffixes like foo.ts:42:10
+        const regex =
+          /(?:\/[\w@./-]+|\.{1,2}\/[\w@./-]+|[\w@][\w@./-]*\/[\w@./-]+)(?::\d+(?::\d+)?)?/g;
+        const links: { startIndex: number; length: number; text: string }[] = [];
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(line)) !== null) {
+          // Strip trailing punctuation that's not part of the path
+          const text = match[0].replace(/[.,;:!?)]+$/, '');
+          if (!text) continue;
+          // Must contain a dot somewhere (file extension) to avoid matching plain directories
+          if (!text.includes('.')) continue;
+          links.push({
+            startIndex: match.index,
+            length: text.length,
+            text,
+          });
+        }
+        callback(
+          links.map((link) => ({
+            range: {
+              start: { x: link.startIndex + 1, y },
+              end: { x: link.startIndex + link.length + 1, y },
+            },
+            text: link.text,
+            activate(event: MouseEvent, _text: string) {
+              // Require Cmd+click (Mac) or Ctrl+click (Linux) to open links
+              const modifierHeld = isMac ? event.metaKey : event.ctrlKey;
+              if (!modifierHeld) return;
+              // Strip line:col suffix for opening
+              const filePath = link.text.replace(/:\d+(:\d+)?$/, '');
+              // Resolve relative paths against the task's working directory
+              const resolved = filePath.startsWith('/') ? filePath : `${props.cwd}/${filePath}`;
+              // .md files open in viewer; Shift held = open externally instead
+              if (/\.md$/i.test(resolved) && props.onFileLink && !event.shiftKey) {
+                props.onFileLink(resolved);
+              } else {
+                invoke(IPC.OpenPath, { filePath: resolved }).catch(console.error);
+              }
+            },
+          })),
+        );
+      },
+    });
+
+    props.onReady?.(() => term?.focus());
+
+    // Step bookmarks — anchor each agent step to the current scrollback line so the
+    // user can jump from the steps panel back to the terminal moment a step was written.
+    // Markers auto-track buffer truncation; once the marker scrolls past the scrollback
+    // limit xterm disposes it, in which case `jump` returns false so the caller can no-op.
+    // The map is owned by xterm and freed implicitly when term.dispose() runs in onCleanup.
+    const stepMarkers = new Map<number, IMarker>();
+    const stepNavApi = {
+      mark(i: number) {
+        if (!term || stepMarkers.has(i)) return;
+        const m = term.registerMarker(0);
+        if (m) stepMarkers.set(i, m);
+      },
+      jump(i: number): boolean {
+        if (!term) return false;
+        const m = stepMarkers.get(i);
+        if (!m || m.isDisposed) return false;
+        term.scrollToLine(m.line);
+        return true;
+      },
+    };
+    props.onStepNavReady?.(stepNavApi);
+    onCleanup(() => props.onStepNavReady?.(undefined));
+
+    props.onBufferReady?.(() => {
+      if (!term) return '';
+      const buf = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i <= buf.length - 1; i++) {
+        const line = buf.getLine(i);
+        if (line) lines.push(line.translateToString(true));
+      }
+      // Trim trailing empty lines
+      while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+      return lines.join('\n');
+    });
+
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== 'keydown') {
+        // Suppress Shift+Enter keyup so xterm doesn't echo a bare Enter
+        if (e.key === 'Enter' && e.shiftKey) return false;
+        return true;
+      }
+
+      // Let global app shortcuts pass through to the window handler
+      if (matchesGlobalShortcut(e)) return false;
+
+      // Look up terminal bindings from registry
+      for (const binding of getTerminalBindings()) {
+        if (!matchesKeyEvent(e, binding)) continue;
+
+        e.preventDefault();
+
+        // Special actions that need custom handling
+        if (binding.action === 'copy') {
+          const sel = term?.getSelection();
+          if (sel) navigator.clipboard.writeText(sel);
+          return false;
+        }
+
+        if (binding.action === 'paste') {
+          (async () => {
+            const text = await navigator.clipboard.readText().catch(() => '');
+            if (text) {
+              enqueueInput(text);
+              return;
+            }
+            // Fall back to clipboard image → save to temp file and paste path
+            const filePath = await invoke<string | null>(IPC.SaveClipboardImage);
+            if (filePath) enqueueInput(filePath);
+          })().catch(() => {});
+          return false;
+        }
+
+        // Generic escape sequence bindings
+        if (binding.escapeSequence) {
+          enqueueInput(binding.escapeSequence);
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    fitAddon.fit();
+    registerTerminal(agentId, containerRef, fitAddon, term);
+
+    if (props.autoFocus) {
+      term.focus();
+    }
+
+    let outputRaf: number | undefined;
+    let outputQueue: Uint8Array[] = [];
+    let outputQueuedBytes = 0;
+    let outputWriteInFlight = false;
+    let watermark = 0;
+    let ptyPaused = false;
+    const FLOW_HIGH = 256 * 1024; // 256KB — pause PTY reader
+    const FLOW_LOW = 32 * 1024; // 32KB — resume PTY reader
+    let pendingExitPayload: {
+      exit_code: number | null;
+      signal: string | null;
+      last_output: string[];
+    } | null = null;
+
+    function emitExit(payload: {
+      exit_code: number | null;
+      signal: string | null;
+      last_output: string[];
+    }) {
+      if (!term) return;
+      term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
+      props.onExit?.(payload);
+    }
+
+    function flushOutputQueue() {
+      if (!term || outputWriteInFlight || outputQueue.length === 0) return;
+
+      const chunks = outputQueue;
+      const totalBytes = outputQueuedBytes;
+      outputQueue = [];
+      outputQueuedBytes = 0;
+
+      let payload: Uint8Array;
+      if (chunks.length === 1) {
+        payload = chunks[0];
+      } else {
+        payload = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+          payload.set(chunk, offset);
+          offset += chunk.length;
+        }
+      }
+
+      const statusPayload =
+        payload.length > STATUS_ANALYSIS_MAX_BYTES
+          ? payload.subarray(payload.length - STATUS_ANALYSIS_MAX_BYTES)
+          : payload;
+
+      outputWriteInFlight = true;
+      // eslint-disable-next-line solid/reactivity -- write callback is not a reactive context
+      term.write(payload, () => {
+        outputWriteInFlight = false;
+        watermark = Math.max(watermark - payload.length, 0);
+
+        // Resume PTY reader when xterm.js has caught up
+        if (watermark < FLOW_LOW && ptyPaused) {
+          ptyPaused = false;
+          invoke(IPC.ResumeAgent, { agentId }).catch(() => {
+            ptyPaused = false;
+          });
+        }
+
+        props.onData?.(statusPayload);
+        if (outputQueue.length > 0) {
+          scheduleOutputFlush();
+          return;
+        }
+        if (pendingExitPayload) {
+          const exit = pendingExitPayload;
+          pendingExitPayload = null;
+          emitExit(exit);
+        }
+      });
+    }
+
+    function scheduleOutputFlush() {
+      if (outputRaf !== undefined) return;
+      outputRaf = requestAnimationFrame(() => {
+        outputRaf = undefined;
+        flushOutputQueue();
+      });
+    }
+
+    function enqueueOutput(chunk: Uint8Array) {
+      outputQueue.push(chunk);
+      outputQueuedBytes += chunk.length;
+      watermark += chunk.length;
+
+      // Pause PTY reader when xterm.js falls behind
+      if (watermark > FLOW_HIGH && !ptyPaused) {
+        ptyPaused = true;
+        invoke(IPC.PauseAgent, { agentId }).catch(() => {
+          ptyPaused = false;
+        });
+      }
+
+      // Flush large bursts promptly to keep perceived latency low.
+      if (outputQueuedBytes >= 64 * 1024) {
+        flushOutputQueue();
+      } else {
+        scheduleOutputFlush();
+      }
+    }
+
+    const onOutput = new Channel<PtyOutput>();
+    let initialCommandSent = false;
+    onOutput.onmessage = (msg) => {
+      if (msg.type === 'Data') {
+        enqueueOutput(base64ToUint8Array(msg.data));
+        if (!initialCommandSent && props.initialCommand) {
+          const cmd = props.initialCommand;
+          initialCommandSent = true;
+          setTimeout(() => enqueueInput(cmd + '\r'), 50);
+        }
+      } else if (msg.type === 'Exit') {
+        pendingExitPayload = msg.data;
+        flushOutputQueue();
+        if (!outputWriteInFlight && outputQueue.length === 0 && pendingExitPayload) {
+          const exit = pendingExitPayload;
+          pendingExitPayload = null;
+          emitExit(exit);
+        }
+      }
+    };
+
+    let inputBuffer = '';
+    let pendingInput = '';
+    let inputFlushTimer: number | undefined;
+
+    function flushPendingInput() {
+      if (!pendingInput) return;
+      const data = pendingInput;
+      pendingInput = '';
+      if (inputFlushTimer !== undefined) {
+        clearTimeout(inputFlushTimer);
+        inputFlushTimer = undefined;
+      }
+      fireAndForget(IPC.WriteToAgent, { agentId, data });
+      if (!props.isShell && (data.includes('\r') || data.includes('\n'))) {
+        setTaskLastInputAt(props.taskId);
+      }
+    }
+
+    function enqueueInput(data: string) {
+      pendingInput += data;
+      if (pendingInput.length >= 2048) {
+        flushPendingInput();
+        return;
+      }
+      if (inputFlushTimer !== undefined) return;
+      // eslint-disable-next-line solid/reactivity
+      inputFlushTimer = window.setTimeout(() => {
+        inputFlushTimer = undefined;
+        flushPendingInput();
+      }, 8);
+    }
+
+    // eslint-disable-next-line solid/reactivity -- event handler reads current prop values intentionally
+    term.onData((data) => {
+      if (props.onPromptDetected) {
+        for (const ch of data) {
+          if (ch === '\r') {
+            const trimmed = inputBuffer.trim();
+            if (trimmed) props.onPromptDetected?.(trimmed);
+            inputBuffer = '';
+          } else if (ch === '\x7f') {
+            inputBuffer = inputBuffer.slice(0, -1);
+          } else if (ch === '\x03' || ch === '\x15') {
+            inputBuffer = '';
+          } else if (ch === '\x1b') {
+            // Skip escape sequences — break out, rest of data may contain seq chars
+            break;
+          } else if (ch >= ' ') {
+            inputBuffer += ch;
+          }
+        }
+      }
+      enqueueInput(data);
+    });
+
+    let resizeFlushTimer: number | undefined;
+    let pendingResize: { cols: number; rows: number } | null = null;
+    let lastSentCols = -1;
+    let lastSentRows = -1;
+
+    function flushPendingResize() {
+      if (!pendingResize) return;
+      const { cols, rows } = pendingResize;
+      pendingResize = null;
+      if (cols === lastSentCols && rows === lastSentRows) return;
+      lastSentCols = cols;
+      lastSentRows = rows;
+      fireAndForget(IPC.ResizeAgent, { agentId, cols, rows });
+    }
+
+    term.onResize(({ cols, rows }) => {
+      pendingResize = { cols, rows };
+      if (resizeFlushTimer !== undefined) return;
+      resizeFlushTimer = window.setTimeout(() => {
+        resizeFlushTimer = undefined;
+        flushPendingResize();
+      }, 33);
+    });
+
+    // Only disable cursor blink for non-focused terminals to save one RAF
+    // loop per terminal.
+    createEffect(() => {
+      if (!term) return;
+      term.options.cursorBlink = props.isFocused === true;
+    });
+
+    // Load WebGL addon for all terminals. On context loss (e.g. too many
+    // WebGL contexts), the terminal gracefully falls back to the DOM renderer.
+    try {
+      webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose();
+        webglAddon = undefined;
+      });
+      term.loadAddon(webglAddon);
+    } catch {
+      // WebGL2 not supported — DOM renderer used automatically
+    }
+
+    // Merge global Terminal Defaults (from Agents view) with task-specific props.
+    // Flags: append after task args — user-level defaults come after agent-level ones,
+    // so late-position flags can override earlier ones if claude supports it.
+    // Env: defaults are base, task env overrides.
+    const defaults = terminalDefaults();
+    const mergedArgs = [...(props.args ?? []), ...defaults.flags];
+    const mergedEnv = { ...defaults.env, ...(props.env ?? {}) };
+
+    invoke(IPC.SpawnAgent, {
+      taskId,
+      agentId,
+      command: props.command,
+      args: mergedArgs,
+      cwd: props.cwd,
+      env: mergedEnv,
+      cols: term.cols,
+      rows: term.rows,
+      isShell: props.isShell,
+      stepsEnabled: props.stepsEnabled,
+      dockerMode: props.dockerMode,
+      dockerImage: props.dockerImage,
+      onOutput,
+      // eslint-disable-next-line solid/reactivity -- promise catch handler reads current prop values intentionally
+    }).catch((err) => {
+      // Strip control/escape characters to prevent terminal escape injection
+      // eslint-disable-next-line no-control-regex -- intentionally stripping control/escape chars to prevent terminal injection
+      const safeErr = String(err).replace(/[\x00-\x1f\x7f]/g, '');
+      term?.write(`\x1b[31mFailed to spawn: ${safeErr}\x1b[0m\r\n`);
+      props.onExit?.({
+        exit_code: null,
+        signal: 'spawn_failed',
+        last_output: [`Failed to spawn: ${safeErr}`],
+      });
+    });
+
+    onCleanup(() => {
+      flushPendingInput();
+      flushPendingResize();
+      if (inputFlushTimer !== undefined) clearTimeout(inputFlushTimer);
+      if (resizeFlushTimer !== undefined) clearTimeout(resizeFlushTimer);
+      if (outputRaf !== undefined) cancelAnimationFrame(outputRaf);
+      onOutput.cleanup?.();
+      webglAddon?.dispose();
+      webglAddon = undefined;
+      unregisterTerminal(agentId);
+      // kill_agent already clears paused flag before killing
+      fireAndForget(IPC.KillAgent, { agentId });
+      term?.dispose();
+    });
+  });
+
+  createEffect(() => {
+    const size = props.fontSize;
+    if (size === undefined || !term || !fitAddon) return;
+    term.options.fontSize = size;
+    markDirty(props.agentId);
+  });
+
+  createEffect(() => {
+    const font = store.terminalFont;
+    if (!term || !fitAddon) return;
+    term.options.fontFamily = getTerminalFontFamily(font);
+    markDirty(props.agentId);
+  });
+
+  createEffect(() => {
+    const preset = store.themePreset;
+    if (!term) return;
+    term.options.theme = getTerminalTheme(preset);
+    markDirty(props.agentId);
+  });
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        padding: '4px 0 0 4px',
+        contain: 'strict',
+      }}
+    />
+  );
+}

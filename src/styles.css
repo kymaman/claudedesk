@@ -1,0 +1,1684 @@
+/* Global visual system + look presets */
+
+/* JetBrains Mono is loaded locally via @fontsource in index.tsx with full
+   Cyrillic subset — do NOT request it from Google Fonts again (its default
+   CSS2 response misses cyrillic and lets the browser fall back per-glyph,
+   causing the Russian-letters-jumping bug in the terminal). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@300..700&family=Space+Mono:wght@400;700&family=Doto:wght@100..900&display=swap');
+
+:root {
+  --font-ui: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', 'Sora', sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    monospace;
+
+  --bg: radial-gradient(120% 120% at 20% 0%, #253848 0%, #151d26 55%, #101418 100%);
+  --bg-elevated: #1c2630;
+  --bg-input: #1a232e;
+  --bg-hover: #253240;
+  --bg-selected: #1c3e55;
+  --bg-selected-subtle: #1c3e5540;
+
+  --border: #2e3e50;
+  --border-subtle: #222e3a;
+  --border-focus: #2ec8ff;
+
+  --fg: #d7e4f0;
+  --fg-muted: #9bb0c3;
+  --fg-subtle: #678197;
+
+  --accent: #2ec8ff;
+  --accent-hover: #59d7ff;
+  --accent-text: #031018;
+  --link: #73dfff;
+
+  --success: #2fd198;
+  --error: #ff5f73;
+  --warning: #ffc569;
+
+  --island-bg: #192028;
+  --island-border: #2e3e50;
+  --island-radius: 12px;
+  --task-container-bg: #151e28;
+  --task-panel-bg: #1c2630;
+
+  --shadow-soft: 0 14px 30px rgba(0, 0, 0, 0.28);
+  --shadow-pop:
+    0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
+    0 14px 36px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #0e1215;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--fg);
+}
+
+body.font-smoothing {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  transition: border-color 0.16s ease;
+}
+
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 40%),
+    radial-gradient(
+      80% 50% at 50% 100%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 70%
+    );
+  opacity: 0.7;
+}
+
+.app-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell[data-window-border='true'][data-window-maximized='false']::after {
+  border-color: color-mix(in srgb, var(--fg-subtle) 42%, transparent);
+}
+
+.app-shell[data-window-border='true'][data-window-maximized='false'][data-window-focused='false']::after {
+  border-color: color-mix(in srgb, var(--fg-subtle) 26%, transparent);
+}
+
+html[data-look='classic'] {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bg: #161618;
+  --bg-elevated: #2d2e32;
+  --bg-input: #2d2e32;
+  --bg-hover: #3a3c40;
+  --bg-selected: #3e508a;
+  --bg-selected-subtle: #3e508a33;
+  --border: #393b3f;
+  --border-subtle: #2d2e32;
+  --border-focus: #4c6fff;
+  --fg: #cccdd2;
+  --fg-muted: #8b8d93;
+  --fg-subtle: #6d7076;
+  --accent: #4c6fff;
+  --accent-hover: #3a5bff;
+  --accent-text: #ffffff;
+  --link: #6b8aff;
+  --success: #0dbc79;
+  --error: #f75464;
+  --warning: #f2c55c;
+  --island-bg: #242428;
+  --island-border: #393b3f;
+  --island-radius: 10px;
+  --task-container-bg: #242428;
+  --task-panel-bg: #2d2e32;
+  --shadow-soft: 0 0 0 rgba(0, 0, 0, 0);
+  --shadow-pop: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+
+.app-shell[data-look='classic']::before {
+  opacity: 0 !important;
+  background: none !important;
+}
+
+.app-shell[data-look='classic'] .task-column.active {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--border) 85%, transparent) !important;
+}
+
+html[data-look='graphite'],
+html[data-look='midnight'] {
+  --bg: radial-gradient(130% 120% at 15% 0%, #253848 0%, #141c26 60%, #101418 100%);
+  --bg-elevated: #1c2630;
+  --bg-input: #19232e;
+  --bg-hover: #253240;
+  --bg-selected: #1c3e55;
+  --bg-selected-subtle: #1c3e5540;
+  --border: #2e3e50;
+  --border-subtle: #222e3a;
+  --border-focus: #2ec8ff;
+  --fg: #d7e4f0;
+  --fg-muted: #9bb0c3;
+  --fg-subtle: #678197;
+  --accent: #2ec8ff;
+  --accent-hover: #59d7ff;
+  --accent-text: #031018;
+  --link: #73dfff;
+  --island-bg: #192028;
+  --island-border: #2e3e50;
+  --task-container-bg: #161e28;
+  --task-panel-bg: #1c2630;
+}
+
+/* Midnight: Graphite variant — only terminal background differs (pure black for OLED) */
+html[data-look='midnight'] {
+  --task-panel-bg: #000000;
+}
+
+html[data-look='indigo'] {
+  --bg: radial-gradient(130% 120% at 18% 0%, #202044 0%, #171c30 58%, #12151f 100%);
+  --bg-elevated: #1c2038;
+  --bg-input: #1a1e35;
+  --bg-hover: #262e50;
+  --bg-selected: #2e3265;
+  --bg-selected-subtle: #2e326540;
+  --border: #384270;
+  --border-subtle: #2b3456;
+  --border-focus: #7a78ff;
+  --fg: #deddff;
+  --fg-muted: #b1b2de;
+  --fg-subtle: #8286b6;
+  --accent: #7a78ff;
+  --accent-hover: #938fff;
+  --accent-text: #090a18;
+  --link: #a8a6ff;
+  --success: #48d2a2;
+  --error: #ff6c90;
+  --warning: #ffcf7a;
+  --island-bg: #1a1e35;
+  --island-border: #384270;
+  --task-container-bg: #151822;
+  --task-panel-bg: #1c2038;
+}
+
+html[data-look='ember'] {
+  --bg: radial-gradient(130% 120% at 85% 0%, #36281e 0%, #171416 55%, #0e0c0e 100%);
+  --bg-elevated: #211918;
+  --bg-input: #1d1614;
+  --bg-hover: #31211d;
+  --bg-selected: #552d1e;
+  --bg-selected-subtle: #552d1e40;
+  --border: #4e3831;
+  --border-subtle: #322420;
+  --border-focus: #ff944d;
+  --fg: #f2ddd1;
+  --fg-muted: #d5ab94;
+  --fg-subtle: #9f7561;
+  --accent: #ff944d;
+  --accent-hover: #ffac73;
+  --accent-text: #201006;
+  --link: #ffb47f;
+  --success: #33c791;
+  --error: #ff6a7f;
+  --warning: #ffd27a;
+  --island-bg: #1e1514;
+  --island-border: #4e3831;
+  --task-container-bg: #1a1212;
+  --task-panel-bg: #211918;
+}
+
+html[data-look='glacier'] {
+  --bg: radial-gradient(140% 120% at 0% 0%, #283a47 0%, #1d2932 52%, #192027 100%);
+  --bg-elevated: #232e3a;
+  --bg-input: #202a34;
+  --bg-hover: #2f4050;
+  --bg-selected: #28535d;
+  --bg-selected-subtle: #28535d40;
+  --border: #3b5363;
+  --border-subtle: #2e424f;
+  --border-focus: #50e2d3;
+  --fg: #e5eff5;
+  --fg-muted: #bed2dc;
+  --fg-subtle: #92aebb;
+  --accent: #50e2d3;
+  --accent-hover: #76ece0;
+  --accent-text: #041413;
+  --link: #8cf2e8;
+  --success: #4ed59f;
+  --error: #ff6f88;
+  --warning: #ffd57d;
+  --island-bg: #212b36;
+  --island-border: #3b5363;
+  --task-container-bg: #1c2730;
+  --task-panel-bg: #232e3a;
+}
+
+html[data-look='minimal'] {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bg: #181817;
+  --bg-elevated: #1d1c1b;
+  --bg-input: #262626;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-selected: rgba(200, 191, 160, 0.14);
+  --bg-selected-subtle: rgba(200, 191, 160, 0.08);
+  --border: #333333;
+  --border-subtle: #2a2a2a;
+  --border-focus: #c8bfa0;
+  --fg: #ececec;
+  --fg-muted: #c0c0c0;
+  --fg-subtle: #999999;
+  --accent: #c8bfa0;
+  --accent-hover: #d8d0b8;
+  --accent-text: #090909;
+  --link: #d8d0b8;
+  --success: #8aaa7a;
+  --error: #c06060;
+  --warning: #d4aa58;
+  --island-bg: #1a1a1a;
+  --island-border: #2a2a2a;
+  --island-radius: 10px;
+  --task-container-bg: #202020;
+  --task-panel-bg: #262626;
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+html[data-look='zenburnesque'] {
+  --bg: radial-gradient(120% 120% at 40% 10%, #353430 0%, #232220 55%, #181716 100%);
+  --bg-elevated: #2e2d2a;
+  --bg-input: #2a2927;
+  --bg-hover: #3a3936;
+  --bg-selected: #3f2e30;
+  --bg-selected-subtle: #3f2e3040;
+  --border: #484640;
+  --border-subtle: #383634;
+  --border-focus: #cc9393;
+  --fg: #dcdccc;
+  --fg-muted: #a0a090;
+  --fg-subtle: #7f8f7f;
+  --accent: #cc9393;
+  --accent-hover: #d8a8a8;
+  --accent-text: #1a0e0e;
+  --link: #d8a8a8;
+  --success: #7f9f7f;
+  --error: #e37170;
+  --warning: #f0dfaf;
+  --island-bg: #262523;
+  --island-border: #484640;
+  --task-container-bg: #212120;
+  --task-panel-bg: #2e2d2a;
+}
+
+.app-shell[data-look='minimal']::before {
+  opacity: 0 !important;
+  background: none !important;
+}
+
+.app-shell[data-look='minimal'] .task-column.active {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--border) 85%, transparent) !important;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg-subtle) 45%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-subtle) 50%, transparent);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg-muted) 55%, transparent);
+}
+
+button {
+  font-family: inherit;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+textarea::placeholder {
+  color: color-mix(in srgb, var(--fg-subtle) 65%, transparent);
+}
+
+.task-item {
+  transition:
+    background 0.13s ease,
+    color 0.13s ease,
+    border-color 0.13s ease;
+}
+
+.task-item:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-hover)) !important;
+  color: var(--fg) !important;
+}
+
+.sidebar-offscreen-attention-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  backdrop-filter: blur(6px);
+}
+
+.icon-btn:hover {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-hover)) !important;
+  color: var(--fg) !important;
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border)) !important;
+}
+
+.icon-btn:active {
+  transform: translateY(1px);
+}
+
+.tiling-layout-shell {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.tiling-layout-strip {
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 4px;
+}
+
+.tiling-layout-scroll-affordance {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 26px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.tiling-layout-scroll-affordance::before,
+.tiling-layout-scroll-affordance::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tiling-layout-scroll-affordance::before {
+  width: 1px;
+  height: 100%;
+  background: color-mix(in srgb, var(--border-focus) 68%, var(--accent) 12%);
+  opacity: 0.72;
+}
+
+.tiling-layout-scroll-affordance::after {
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid color-mix(in srgb, var(--accent-hover) 78%, white 22%);
+  opacity: 0.95;
+}
+
+.tiling-layout-scroll-affordance-left {
+  left: 4px;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--border-focus) 16%, var(--accent) 6%),
+    color-mix(in srgb, var(--accent) 8%, transparent) 28%,
+    color-mix(in srgb, var(--accent) 4%, transparent) 52%,
+    transparent 100%
+  );
+}
+
+.tiling-layout-scroll-affordance-left::before {
+  left: 0;
+}
+
+.tiling-layout-scroll-affordance-left::after {
+  left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent-hover) 78%, white 22%);
+  transform: translateY(-50%) rotate(-45deg);
+}
+
+.tiling-layout-scroll-affordance-right {
+  right: 4px;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--border-focus) 16%, var(--accent) 6%),
+    color-mix(in srgb, var(--accent) 8%, transparent) 28%,
+    color-mix(in srgb, var(--accent) 4%, transparent) 52%,
+    transparent 100%
+  );
+}
+
+.tiling-layout-scroll-affordance-right::before {
+  right: 0;
+}
+
+.tiling-layout-scroll-affordance-right::after {
+  right: 10px;
+  border-right: 2px solid color-mix(in srgb, var(--accent-hover) 78%, white 22%);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.tiling-layout-scroll-affordance-attention::before {
+  background: color-mix(in srgb, var(--warning) 72%, var(--accent) 14%);
+  opacity: 0.95;
+}
+
+.tiling-layout-scroll-affordance-attention::after {
+  border-top-color: color-mix(in srgb, var(--warning) 82%, white 18%);
+  animation: statusPulse 1.4s ease-in-out infinite;
+}
+
+.tiling-layout-scroll-affordance-attention.tiling-layout-scroll-affordance-left {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--warning) 18%, transparent),
+    color-mix(in srgb, var(--warning) 10%, transparent) 28%,
+    color-mix(in srgb, var(--warning) 5%, transparent) 52%,
+    transparent 100%
+  );
+}
+
+.tiling-layout-scroll-affordance-attention.tiling-layout-scroll-affordance-right {
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--warning) 18%, transparent),
+    color-mix(in srgb, var(--warning) 10%, transparent) 28%,
+    color-mix(in srgb, var(--warning) 5%, transparent) 52%,
+    transparent 100%
+  );
+}
+
+.tiling-layout-scroll-affordance-attention.tiling-layout-scroll-affordance-left::after {
+  border-left-color: color-mix(in srgb, var(--warning) 82%, white 18%);
+}
+
+.tiling-layout-scroll-affordance-attention.tiling-layout-scroll-affordance-right::after {
+  border-right-color: color-mix(in srgb, var(--warning) 82%, white 18%);
+}
+
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  box-shadow: var(--shadow-pop);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-danger:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--error) 35%, transparent);
+}
+
+.btn-danger:active {
+  transform: scale(0.98);
+}
+
+.btn-secondary:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover)) !important;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important;
+}
+
+.review-plan-btn:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input)) !important;
+}
+
+.dialog-overlay .btn-secondary:focus,
+.dialog-overlay .btn-primary:focus,
+.dialog-overlay .btn-danger:focus {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 1.5px;
+}
+
+.input-field,
+.prompt-textarea {
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+}
+
+.input-field:focus,
+.prompt-textarea:focus,
+.project-select:focus-visible,
+.project-select:focus,
+.agent-btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible {
+  border-color: var(--border-focus) !important;
+  box-shadow:
+    0 0 0 2.5px color-mix(in srgb, var(--border-focus) 38%, transparent),
+    0 8px 20px color-mix(in srgb, var(--border-focus) 14%, transparent);
+  outline: none;
+}
+
+.project-select,
+.project-select::picker(select) {
+  appearance: base-select;
+}
+
+.project-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  outline: none;
+}
+
+.project-select::picker-icon {
+  color: var(--fg-muted);
+  transition: rotate 0.14s ease;
+}
+
+.project-select:open::picker-icon {
+  rotate: 180deg;
+}
+
+.project-select::picker(select) {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+}
+
+.project-select option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+}
+
+.project-select option:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+}
+
+.project-select option:checked {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.project-select option::checkmark {
+  display: none;
+}
+
+.project-select button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.project-color-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-btn:hover {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-hover)) !important;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important;
+}
+
+.agent-btn.selected {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 85%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.agent-btn.selected:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 85%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--border-focus) 23%, transparent),
+    0 8px 20px color-mix(in srgb, var(--border-focus) 10%, transparent);
+}
+
+@keyframes taskAppear {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.task-appearing {
+  animation: taskAppear 0.24s ease;
+}
+
+@keyframes taskItemAppear {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    max-height: 40px;
+    transform: translateX(0);
+  }
+}
+
+.task-item-appearing {
+  animation: taskItemAppear 0.25s ease;
+}
+
+@keyframes taskRemove {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+.task-removing {
+  animation: taskRemove 0.24s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes taskItemRemove {
+  from {
+    opacity: 1;
+    max-height: 40px;
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin: 0;
+  }
+}
+
+.task-item-removing {
+  animation: taskItemRemove 0.24s ease forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.task-column {
+  box-shadow: var(--shadow-soft);
+  border-color: color-mix(in srgb, var(--border) 85%, transparent) !important;
+  margin: 0 2px;
+  opacity: var(--inactive-column-opacity, 0.6);
+}
+
+.task-column.active {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+  border-color: color-mix(in srgb, var(--border) 85%, transparent) !important;
+  opacity: 1;
+}
+
+.focusable-panel {
+  position: relative;
+}
+
+.focusable-panel:focus-within::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--border-focus);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Prompt input already has its own textarea focus treatment */
+.prompt-input-panel:focus-within::after {
+  content: none;
+}
+
+/* Shell toolbar uses button-level focus states instead of container outline */
+.shell-toolbar-panel:focus-within::after {
+  content: none;
+}
+
+.dialog-overlay {
+  animation: fadeIn 0.16s ease;
+  background: color-mix(in srgb, #000 44%, transparent);
+  backdrop-filter: saturate(1.15);
+}
+
+.dialog-overlay > form,
+.dialog-overlay > .dialog-content {
+  animation: slideUp 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.file-row:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.status-dot-pulse {
+  animation: statusPulse 1.9s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes spinnerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.inline-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-top-color: currentColor;
+  animation: spinnerSpin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.exit-badge {
+  backdrop-filter: blur(10px);
+  animation: fadeIn 0.2s ease;
+}
+
+.empty-state {
+  opacity: 0.85;
+}
+
+.island-header-active {
+  border-bottom-color: var(--border) !important;
+}
+
+.resize-handle {
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.resize-handle-h {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.resize-handle-v {
+  height: 6px;
+  cursor: row-resize;
+}
+
+.new-task-placeholder {
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.new-task-placeholder:focus-visible {
+  outline: none;
+}
+
+.new-task-placeholder:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.xterm .xterm-scrollable-element > .scrollbar.vertical {
+  width: 8px !important;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  width: 8px !important;
+  left: 0 !important;
+}
+
+/* Terminal rendering performance: let xterm use its own opaque background
+   (set via theme in TerminalView) instead of forcing transparency.
+   Opaque backgrounds enable the WebGL renderer's fast path and avoid
+   per-frame alpha blending — a major win on Linux. */
+
+/* Disable ligatures in the terminal — complex text shaping (especially
+   JetBrains Mono / Fira Code ligatures) is expensive on Linux. */
+.xterm {
+  font-variant-ligatures: none;
+  -webkit-font-variant-ligatures: none;
+  text-rendering: optimizeSpeed;
+}
+
+.drop-indicator {
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  margin: 0 2px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.drag-drop-indicator {
+  position: fixed;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+body.dragging-task {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+body.dragging-task * {
+  cursor: grabbing !important;
+}
+
+.editable-text {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+.shell-terminal-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.shell-terminal-container:hover .shell-terminal-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.shell-terminal-container .xterm {
+  opacity: 0.8;
+}
+
+.shell-terminal-container:focus-within .xterm {
+  opacity: 1;
+}
+
+.prompt-textarea {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 3%, transparent);
+}
+
+.prompt-textarea::placeholder {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.prompt-textarea:focus::placeholder {
+  opacity: 0.6;
+}
+
+.prompt-send-btn {
+  box-shadow: none;
+}
+
+.prompt-send-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.prompt-send-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.settings-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-theme-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 72%, transparent);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-theme-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+}
+
+.settings-theme-card.active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 17%, transparent);
+}
+
+.settings-theme-title {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-theme-desc {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .settings-theme-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-font-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-font-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 72%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-font-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+}
+
+.settings-font-card.active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 17%, transparent);
+}
+
+.settings-font-name {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-font-preview {
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+@media (max-width: 720px) {
+  .settings-font-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Frameless window chrome */
+.window-titlebar {
+  height: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: opacity 0.15s ease;
+}
+
+.window-titlebar.unfocused {
+  opacity: 0.75;
+  background: transparent;
+}
+
+.window-drag-region {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  user-select: none;
+  cursor: default;
+}
+
+.window-drag-region * {
+  cursor: default;
+}
+
+.window-title-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.window-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.window-controls {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.window-control-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.window-control-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.window-control-btn.close:hover {
+  background: #c73b3b;
+  color: #ffffff;
+}
+
+/* macOS native titlebar spacer (overlay style) */
+.mac-titlebar-spacer {
+  height: 32px;
+  min-height: 32px;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Frameless resize handles */
+.window-resize-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2500;
+}
+
+.window-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.window-resize-handle.n {
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.window-resize-handle.s {
+  bottom: 0;
+  left: 8px;
+  right: 8px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.window-resize-handle.e {
+  top: 8px;
+  right: 0;
+  bottom: 8px;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.window-resize-handle.w {
+  top: 8px;
+  left: 0;
+  bottom: 8px;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.window-resize-handle.ne {
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nesw-resize;
+}
+
+.window-resize-handle.nw {
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nwse-resize;
+}
+
+.window-resize-handle.se {
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nwse-resize;
+}
+
+.window-resize-handle.sw {
+  left: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nesw-resize;
+}
+
+/* Monaco diff: hidden unchanged regions — make the collapse bar obvious and clickable */
+.monaco-editor .diff-hidden-lines .center {
+  cursor: pointer;
+  height: 28px;
+  line-height: 28px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  border-radius: 4px;
+  transition: filter 0.15s ease;
+}
+
+.monaco-editor .diff-hidden-lines .center:hover {
+  filter: brightness(1.3);
+}
+
+/* Let the label text also be single-clickable (Monaco defaults to dblclick) */
+.monaco-editor .diff-hidden-lines .center span {
+  pointer-events: none;
+}
+
+/* Hide the unfold icon — the whole bar is clickable now */
+.monaco-editor .diff-hidden-lines .center > div:first-child {
+  width: 0 !important;
+  overflow: hidden;
+}
+
+/* Hide the tiny drag handles — the center bar handles expansion */
+.monaco-editor .diff-hidden-lines .top,
+.monaco-editor .diff-hidden-lines .bottom {
+  display: none;
+}
+
+/* Plan markdown rendering */
+/* ── Plan markdown: base (compact panel preview) ── */
+.plan-markdown h1,
+.plan-markdown h2,
+.plan-markdown h3 {
+  margin: 0.5em 0 0.3em;
+  font-weight: 600;
+}
+.plan-markdown h1 {
+  font-size: 1.2em;
+}
+.plan-markdown h2 {
+  font-size: 1.1em;
+}
+.plan-markdown h3 {
+  font-size: 1em;
+}
+.plan-markdown p {
+  margin: 0.3em 0;
+}
+.plan-markdown ul,
+.plan-markdown ol {
+  margin: 0.3em 0;
+  padding-left: 1.5em;
+}
+.plan-markdown li {
+  margin: 0.1em 0;
+}
+.plan-markdown code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.plan-markdown pre {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.5em;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.3em 0;
+}
+.plan-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.plan-markdown pre.shiki-block {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.6em 0.8em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+  line-height: 1.5;
+}
+.plan-markdown pre.shiki-block code {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+.plan-markdown pre.shiki-block[data-lang]:not([data-lang=''])::before {
+  content: attr(data-lang);
+  display: block;
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.plan-markdown input[type='checkbox'] {
+  margin-right: 0.4em;
+}
+.plan-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  margin: 0.5em 0;
+}
+
+/* ── Plan markdown: dialog (enhanced readability) ── */
+.plan-markdown-dialog {
+  max-width: 720px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+/* Headings — stronger hierarchy with dividers */
+.plan-markdown-dialog h1 {
+  font-size: 1.6em;
+  margin: 1.4em 0 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.12);
+  letter-spacing: -0.01em;
+}
+.plan-markdown-dialog h1:first-child {
+  margin-top: 0;
+}
+.plan-markdown-dialog h2 {
+  font-size: 1.3em;
+  margin: 1.2em 0 0.5em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.plan-markdown-dialog h3 {
+  font-size: 1.1em;
+  margin: 1em 0 0.4em;
+  color: var(--fg-muted);
+}
+.plan-markdown-dialog h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.8em 0 0.3em;
+  color: var(--fg-muted);
+}
+
+/* Paragraphs — more breathing room */
+.plan-markdown-dialog p {
+  margin: 0.6em 0;
+}
+
+/* Lists — better spacing */
+.plan-markdown-dialog ul,
+.plan-markdown-dialog ol {
+  margin: 0.6em 0;
+  padding-left: 1.6em;
+}
+.plan-markdown-dialog li {
+  margin: 0.3em 0;
+  line-height: 1.6;
+}
+.plan-markdown-dialog li > ul,
+.plan-markdown-dialog li > ol {
+  margin: 0.2em 0;
+}
+
+/* Inline code — monospace stands out from proportional prose */
+.plan-markdown-dialog code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Code blocks — keep monospace, more padding */
+.plan-markdown-dialog pre {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0.8em 0;
+}
+.plan-markdown-dialog pre code {
+  border: none;
+  font-size: inherit;
+}
+.plan-markdown-dialog pre.shiki-block {
+  padding: 0.8em 1em;
+  border-radius: 8px;
+  margin: 0.8em 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Blockquotes */
+.plan-markdown-dialog blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 0 0.4em 1em;
+  border-left: 3px solid var(--accent);
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.plan-markdown-dialog blockquote p {
+  margin: 0.3em 0;
+}
+
+/* Tables */
+.plan-markdown-dialog table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.9em;
+}
+.plan-markdown-dialog th,
+.plan-markdown-dialog td {
+  padding: 0.5em 0.8em;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.plan-markdown-dialog th {
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  color: var(--fg-muted);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.plan-markdown-dialog tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Horizontal rules — section dividers */
+.plan-markdown-dialog hr {
+  margin: 1.5em 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Checkboxes — bigger click target */
+.plan-markdown-dialog input[type='checkbox'] {
+  margin-right: 0.5em;
+  transform: scale(1.1);
+}
+
+/* Strong/emphasis */
+.plan-markdown-dialog strong {
+  font-weight: 650;
+  color: var(--fg);
+}
+
+/* Links */
+.plan-markdown-dialog a {
+  color: var(--link);
+  text-decoration: none;
+}
+.plan-markdown-dialog a:hover {
+  text-decoration: underline;
+}
+
+/* Mermaid diagram blocks */
+.mermaid-block {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 1em;
+  margin: 0.8em 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  white-space: pre;
+  color: var(--fg-muted);
+}
+.mermaid-block.mermaid-rendered {
+  white-space: normal;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* AskCodeCard loading animation */
+@keyframes askcode-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── Nothing design system ── */
+
+html[data-look='nothing'] {
+  --font-ui: 'Space Grotesk', system-ui, sans-serif;
+  --font-display: 'Doto', 'Space Grotesk', sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', monospace;
+  --bg: #000000;
+  --bg-elevated: #0a0a0a;
+  --bg-input: #111111;
+  --bg-hover: #1a1a1a;
+  --bg-selected: #1f1f1f;
+  --bg-selected-subtle: #1f1f1f40;
+  --bg-panel: #111111;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-focus: #FF3E3E;
+  --border-strong: rgba(255, 255, 255, 0.30);
+  --fg: #ffffff;
+  --fg-muted: #888888;
+  --fg-subtle: #555555;
+  --accent: #FF3E3E;
+  --accent-alt: #F5FF00;
+  --accent-hover: #ff6060;
+  --accent-text: #000000;
+  --link: #FF3E3E;
+  --success: #00FF88;
+  --error: #FF3E3E;
+  --warning: #F5FF00;
+  --island-bg: #0a0a0a;
+  --island-border: rgba(255, 255, 255, 0.12);
+  --island-radius: 2px;
+  --task-container-bg: #000000;
+  --task-panel-bg: #0a0a0a;
+  --shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-pop: 0 0 0 1px #FF3E3E, 0 0 20px rgba(255, 62, 62, 0.25);
+  --radius: 2px;
+  --radius-lg: 4px;
+}
+
+.theme-nothing,
+html[data-look='nothing'] {
+  --bg: #000000;
+  --bg-elevated: #0a0a0a;
+  --bg-panel: #111111;
+  --fg: #ffffff;
+  --fg-muted: #888888;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.30);
+  --accent: #FF3E3E;
+  --accent-alt: #F5FF00;
+  --radius: 2px;
+  --radius-lg: 4px;
+  --font-sans: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', monospace;
+  --font-display: 'Doto', 'Space Grotesk', sans-serif;
+}
+
+html[data-look='nothing'] body,
+html[data-look='nothing'] {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-feature-settings: 'ss01', 'ss02';
+}
+
+/* Sharp corners on interactive elements */
+html[data-look='nothing'] button,
+html[data-look='nothing'] input,
+html[data-look='nothing'] .chip,
+html[data-look='nothing'] .panel {
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+/* Monospace metadata / labels */
+html[data-look='nothing'] .metadata,
+html[data-look='nothing'] .mono,
+html[data-look='nothing'] code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}
+
+/* Suppress glow overlays that clash with pure-black OLED aesthetic */
+.app-shell[data-look='nothing']::before {
+  opacity: 0 !important;
+  background: none !important;
+}
+
+/* Suppress the tiling accent glow for Nothing look */
+.app-shell[data-look='nothing'] .task-column.active {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.22) !important;
+}
+
+/* Segmented progress bars — Nothing signature element */
+html[data-look='nothing'] .progress-segmented {
+  display: inline-flex;
+  gap: 2px;
+}
+
+html[data-look='nothing'] .progress-segmented > span {
+  width: 8px;
+  height: 12px;
+  background: var(--border);
+}
+
+html[data-look='nothing'] .progress-segmented > span.active {
+  background: var(--fg);
+}
+
+html[data-look='nothing'] .progress-segmented > span.accent {
+  background: var(--accent);
+}

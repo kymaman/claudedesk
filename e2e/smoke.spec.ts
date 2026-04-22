@@ -205,6 +205,29 @@ test('Clicking ▶ on a session opens a chat tile with xterm', async () => {
   await expect(tile.locator('.xterm').first()).toBeVisible({ timeout: 5_000 });
   await expect(tile.locator('.xterm-screen').first()).toBeVisible();
 
+  // Regression: the first chat must occupy the full remaining pane.
+  const box = await tile.boundingBox();
+  if (!box) throw new Error('tile has no bounding box');
+
+  // Debug sizes for layout diagnosis (visible on failure)
+  const parentBoxes = await window.evaluate(() => {
+    const panel = document.querySelector('.sessions-panel__body');
+    const chatsGrid = document.querySelector('.chats-grid');
+    const chatsPane = document.querySelector('.sessions-panel__chats');
+    const winBox = [window.innerWidth, window.innerHeight];
+    const rect = (el: Element | null) =>
+      el ? { w: (el as HTMLElement).clientWidth, h: (el as HTMLElement).clientHeight } : null;
+    return { win: winBox, panel: rect(panel), chatsPane: rect(chatsPane), chatsGrid: rect(chatsGrid) };
+  });
+  console.log('Layout boxes:', parentBoxes);
+
+  // Regression guard: the previous bug left the tile at ~80 columns × 24 rows
+  // (~640×480) inside a giant empty area. We want the tile to fill the
+  // available space — at least 500px wide and 300px tall on the default
+  // Playwright window.
+  expect(box.width, `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`).toBeGreaterThan(500);
+  expect(box.height, `tile.height=${box.height}`).toBeGreaterThan(300);
+
   // Close the chat so later tests start from a known state.
   await tile.locator('.chat-tile__close').click();
   await window.waitForTimeout(400);

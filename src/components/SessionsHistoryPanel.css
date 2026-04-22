@@ -142,9 +142,14 @@
   flex: 1;
   display: grid;
   grid-template-columns: 200px 1fr 340px;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   transition: grid-template-columns 180ms ease;
+}
+
+.sessions-panel__body > * {
+  min-height: 0;
 }
 
 /* When any chat is open: sessions become a narrow rail, preview is replaced

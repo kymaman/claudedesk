@@ -24,7 +24,14 @@
   min-height: 0;
   padding: 4px;
   grid-auto-rows: minmax(0, 1fr);
+  grid-template-rows: repeat(auto-fit, minmax(0, 1fr));
   background: color-mix(in srgb, var(--bg) 98%, var(--fg));
+}
+
+/* Single chat → one full-size tile (no tiny 1x1 in a giant grid). */
+.chats-grid:has(> .chat-tile:only-child) {
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
 }
 
 .chat-tile {

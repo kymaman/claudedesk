@@ -5,7 +5,7 @@
  * TerminalView. Tile selection ring shows the active chat.
  */
 
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createMemo, onMount, onCleanup } from 'solid-js';
 import {
   activeChatId,
   setActiveChatId,
@@ -61,6 +61,21 @@ function ChatTile(props: { chat: Chat }) {
     if (next && next.trim() && next !== current) renameChat(props.chat.id, next.trim());
   }
 
+  // Observe the tile body so xterm refits when the grid reflows (e.g. when a
+  // second chat is opened and tiles go from 1-wide to 2-wide).
+  let bodyRef!: HTMLDivElement;
+  onMount(() => {
+    if (!bodyRef || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      // markDirty in terminalFitManager re-runs fit(); imported as side effect
+      // via TerminalView, but we re-dispatch a window resize so the fit manager
+      // picks up the tile's new size even before its internal debounce.
+      window.dispatchEvent(new Event('resize'));
+    });
+    ro.observe(bodyRef);
+    onCleanup(() => ro.disconnect());
+  });
+
   return (
     <div
       class={`chat-tile${isActive() ? ' chat-tile--active' : ''}`}
@@ -82,7 +97,7 @@ function ChatTile(props: { chat: Chat }) {
           ×
         </button>
       </div>
-      <div class="chat-tile__body">
+      <div class="chat-tile__body" ref={bodyRef}>
         <TerminalView
           taskId={props.chat.id}
           agentId={props.chat.id}

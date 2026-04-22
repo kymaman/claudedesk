@@ -62,13 +62,13 @@ test('window loads and is titled', async () => {
   expect(await window.isVisible('body')).toBe(true);
 });
 
-test('TopSwitcher renders four nav buttons: History, Chats, Branches, Agents', async () => {
+test('TopSwitcher renders four nav buttons: History, Chats, Branches, Settings', async () => {
   const nav = window.locator('.top-switcher__nav .ts-nav');
   await expect(nav).toHaveCount(4);
   await expect(nav.nth(0)).toHaveText(/History/);
   await expect(nav.nth(1)).toHaveText(/Chats/);
   await expect(nav.nth(2)).toHaveText(/Branches/);
-  await expect(nav.nth(3)).toHaveText(/Agents/);
+  await expect(nav.nth(3)).toHaveText(/Settings/);
 });
 
 test('History is the default view and shows folders + session list + preview', async () => {
@@ -94,21 +94,17 @@ test('Search input filters sessions', async () => {
   await search.fill('');
 });
 
-test('Switch to Agents view — cards and terminal defaults are present', async () => {
-  await window.locator('.ts-nav', { hasText: 'Agents' }).click();
+test('Switch to Settings view — terminal defaults + agent cards present', async () => {
+  await window.locator('.ts-nav', { hasText: 'Settings' }).click();
   await expect(window.locator('.agents-view')).toBeVisible();
-  // At least one agent card should be rendered (Claude Code presets are built in)
-  const cards = window.locator('.agent-card');
-  await expect(cards.first()).toBeVisible();
-
-  // Terminal defaults block
-  await expect(window.locator('.defaults-textarea').first()).toBeVisible();
+  await expect(window.locator('.agent-card').first()).toBeVisible();
   await expect(window.locator('.defaults-btn', { hasText: 'Save flags' })).toBeVisible();
+  await expect(window.locator('.defaults-btn', { hasText: 'Save & rescan' })).toBeVisible();
 });
 
 test('Terminal defaults persist after save', async () => {
-  // Still on Agents view from previous test
-  const flagsArea = window.locator('.defaults-textarea').first();
+  // The flags textarea lives in the accent section at the top of Settings
+  const flagsArea = window.locator('.agents-section--accent .defaults-textarea').first();
   await flagsArea.fill('--dangerously-skip-permissions');
   await window.locator('.defaults-btn', { hasText: 'Save flags' }).click();
   await expect(window.locator('.defaults-flash', { hasText: 'saved' })).toBeVisible();
@@ -176,6 +172,34 @@ test('Launch options gear expands per-session inline form', async () => {
   await gear.click();
   await expect(firstRow.locator('.session-item__launch-options')).toBeVisible();
   await expect(firstRow.locator('.launch-option__textarea')).toBeVisible();
+});
+
+test('Clicking ▶ on a session opens a chat tile with xterm', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.waitForTimeout(500);
+
+  const firstRow = window.locator('.session-item').first();
+  const hasRow = (await firstRow.count()) > 0;
+  test.skip(!hasRow, 'No sessions available to open a chat');
+
+  // Click the ▶ button on the first session row. The row itself is also
+  // clickable, but the explicit button is more targeted.
+  await firstRow.locator('.session-item__resume').click();
+  await window.waitForTimeout(1200);
+
+  // Layout flips to compact mode — chats grid appears to the right.
+  await expect(window.locator('.sessions-panel__body--compact')).toBeVisible({ timeout: 5_000 });
+  // At least one chat tile with xterm container.
+  const tile = window.locator('.chat-tile').first();
+  await expect(tile).toBeVisible();
+  // xterm mounts an `.xterm` inside the tile body — confirms the terminal
+  // actually mounted, not just the outer tile.
+  await expect(tile.locator('.xterm').first()).toBeVisible({ timeout: 5_000 });
+  await expect(tile.locator('.xterm-screen').first()).toBeVisible();
+
+  // Close the chat so later tests start from a known state.
+  await tile.locator('.chat-tile__close').click();
+  await window.waitForTimeout(400);
 });
 
 test('Create folder via inline input persists in folders pane', async () => {

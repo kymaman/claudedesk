@@ -10,6 +10,7 @@ import { IPC } from '../../electron/ipc/channels';
 import { store } from './core';
 import { addProject } from './projects';
 import { createTask } from './tasks';
+import { filterState } from './session-filters';
 import type { AgentDef } from '../ipc/types';
 
 // ---------------------------------------------------------------------------
@@ -112,8 +113,11 @@ export async function loadSessions(extraFolders?: string[]): Promise<void> {
   setSessionsLoading(true);
   setSessionsError(null);
   try {
+    // Merge caller-provided + user-configured extra folders
+    const configured = filterState().extraFolders;
+    const merged = Array.from(new Set([...configured, ...(extraFolders ?? [])]));
     const result = await invoke<SessionItem[]>(IPC.ListClaudeSessions, {
-      extraFolders: extraFolders ?? [],
+      extraFolders: merged,
     });
     setSessions(result);
   } catch (err) {
@@ -139,7 +143,13 @@ export function filteredSessions(): SessionItem[] {
   const q = searchQuery().toLowerCase().trim();
   const folderId = activeFolderId();
   const projectPath = activeProjectPath();
+  const f = filterState();
   let list = sessions();
+
+  // Hide explicitly-suppressed projects (unless user is drilling into one)
+  if (!projectPath && f.hiddenProjects.length > 0) {
+    list = list.filter((s) => !f.hiddenProjects.includes(s.projectPath));
+  }
   if (folderId) {
     list = list.filter((s) => s.folderIds.includes(folderId));
   }
@@ -153,6 +163,27 @@ export function filteredSessions(): SessionItem[] {
         s.projectPath.toLowerCase().includes(q) ||
         (s.description ?? '').toLowerCase().includes(q),
     );
+  }
+
+  // Sort
+  list = [...list];
+  switch (f.sort) {
+    case 'oldest':
+      list.sort((a, b) => a.date.localeCompare(b.date));
+      break;
+    case 'project':
+      list.sort(
+        (a, b) =>
+          a.projectPath.localeCompare(b.projectPath) ||
+          b.date.localeCompare(a.date),
+      );
+      break;
+    case 'title':
+      list.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case 'newest':
+    default:
+      list.sort((a, b) => b.date.localeCompare(a.date));
   }
   return list;
 }

@@ -49,6 +49,59 @@
   border-color: var(--accent);
 }
 
+.sessions-panel__sort {
+  flex-shrink: 0;
+  padding: 3px 6px;
+  background: var(--bg-input, color-mix(in srgb, var(--fg) 5%, var(--bg)));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.folder-row-smart-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.folder-row-smart-wrap .folder-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-row-smart-wrap__toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.folder-row-smart-wrap:hover .folder-row-smart-wrap__toggle {
+  opacity: 1;
+}
+
+.folder-row-smart-wrap__toggle:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+}
+
+.folder-row--hidden .folder-row__label {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
 .sessions-panel__close {
   background: transparent;
   border: none;
@@ -308,7 +361,30 @@
 
 .folder-row--drop {
   border-color: var(--accent, #FF3E3E);
-  background: color-mix(in srgb, var(--accent, #FF3E3E) 10%, transparent);
+  background: color-mix(in srgb, var(--accent, #FF3E3E) 22%, transparent);
+  box-shadow: 0 0 0 2px var(--accent, #FF3E3E);
+  transform: scale(1.02);
+  transition: transform 80ms, box-shadow 80ms, background 80ms;
+}
+
+.session-drag-ghost {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  padding: 4px 10px;
+  background: var(--accent, #FF3E3E);
+  color: var(--bg, #000);
+  border: 1px solid var(--accent, #FF3E3E);
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .folder-row__label {

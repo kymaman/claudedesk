@@ -23,6 +23,17 @@
   margin-bottom: 48px;
 }
 
+.agents-section--accent {
+  border-left: 3px solid var(--accent, #FF3E3E);
+  padding-left: 14px;
+  margin-left: -14px;
+  background: color-mix(in srgb, var(--accent, #FF3E3E) 4%, transparent);
+  padding-top: 10px;
+  padding-right: 14px;
+  padding-bottom: 10px;
+  border-radius: 0 8px 8px 0;
+}
+
 .agents-section__title {
   font-size: 18px;
   font-weight: 600;

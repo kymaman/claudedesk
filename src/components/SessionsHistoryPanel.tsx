@@ -45,6 +45,12 @@ import {
 } from '../store/launch-settings';
 import { openChatFromSession, openChats } from '../store/chats';
 import { ChatsGrid } from './ChatsGrid';
+import {
+  filterState,
+  setSortOrder,
+  toggleHiddenProject,
+  type SortOrder,
+} from '../store/session-filters';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
@@ -106,6 +112,17 @@ export function SessionsHistoryPanel(props: Props) {
           value={searchQuery()}
           onInput={(e) => setSearchQuery(e.currentTarget.value)}
         />
+        <select
+          class="sessions-panel__sort"
+          value={filterState().sort}
+          onChange={(e) => setSortOrder(e.currentTarget.value as SortOrder)}
+          title="Sort order"
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="project">Project</option>
+          <option value="title">Title</option>
+        </select>
         <button
           class="sessions-panel__refresh"
           onClick={() => {
@@ -227,19 +244,34 @@ export function SessionsHistoryPanel(props: Props) {
           <Show when={smartProjectGroups().length > 0}>
             <div class="folders-pane__section-title">By project</div>
             <For each={smartProjectGroups()}>
-              {(group) => (
-                <button
-                  class={`folder-row folder-row--smart${activeProjectPath() === group.projectPath ? ' folder-row--active' : ''}`}
-                  onClick={() => {
-                    setActiveProjectPath(group.projectPath);
-                    setActiveFolderId(null);
-                  }}
-                  title={group.projectPath}
-                >
-                  <span class="folder-row__label">{group.basename}</span>
-                  <span class="folder-row__count">{group.count}</span>
-                </button>
-              )}
+              {(group) => {
+                const isHidden = () => filterState().hiddenProjects.includes(group.projectPath);
+                return (
+                  <div class="folder-row-smart-wrap">
+                    <button
+                      class={`folder-row folder-row--smart${activeProjectPath() === group.projectPath ? ' folder-row--active' : ''}${isHidden() ? ' folder-row--hidden' : ''}`}
+                      onClick={() => {
+                        setActiveProjectPath(group.projectPath);
+                        setActiveFolderId(null);
+                      }}
+                      title={group.projectPath + (isHidden() ? ' (hidden from All sessions)' : '')}
+                    >
+                      <span class="folder-row__label">{group.basename}</span>
+                      <span class="folder-row__count">{group.count}</span>
+                    </button>
+                    <button
+                      class="folder-row-smart-wrap__toggle"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleHiddenProject(group.projectPath);
+                      }}
+                      title={isHidden() ? 'Show in All sessions' : 'Hide from All sessions'}
+                    >
+                      {isHidden() ? '◇' : '◆'}
+                    </button>
+                  </div>
+                );
+              }}
             </For>
           </Show>
         </aside>
@@ -516,6 +548,16 @@ function SessionRow(props: {
     // (it triggers on text/plain or text/uri-list).
     e.dataTransfer.setData(DRAG_MIME, props.session.sessionId);
     e.dataTransfer.effectAllowed = 'copy';
+
+    // Compact ghost image: a small chip with the session title (instead of
+    // the huge default screenshot of the whole row which blocks the cursor).
+    const ghost = document.createElement('div');
+    ghost.className = 'session-drag-ghost';
+    ghost.textContent = props.session.title.slice(0, 40);
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 10, 10);
+    // Defer removal until after the browser snapshots the element.
+    setTimeout(() => ghost.remove(), 0);
   }
 
   function shortPath(p: string): string {

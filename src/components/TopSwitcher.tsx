@@ -22,7 +22,7 @@ const NAV: NavItem[] = [
   { id: 'history', label: 'History', hotkey: '⌃H' },
   { id: 'chats', label: 'Chats', hotkey: '⌃K' },
   { id: 'branches', label: 'Branches', hotkey: '⌃⇧B' },
-  { id: 'agents', label: 'Agents', hotkey: '⌃J' },
+  { id: 'agents', label: 'Settings', hotkey: '⌃J' },
 ];
 
 export function TopSwitcher() {

@@ -207,6 +207,22 @@
   border-radius: 8px;
 }
 
+.folders-pane__section-title {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-subtle);
+  padding: 8px 10px 2px;
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
+.folder-row--smart .folder-row__label {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+}
+
 .sessions-panel__list {
   overflow-y: auto;
   overflow-x: hidden;
@@ -425,6 +441,88 @@
   outline: none;
   border-color: var(--accent);
   opacity: 1;
+}
+
+.session-item__gear {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.55;
+  transition: opacity 120ms;
+}
+
+.session-item:hover .session-item__gear {
+  opacity: 1;
+}
+
+.session-item__gear:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+}
+
+.session-item__launch-options {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.launch-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.launch-option--full {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  cursor: default;
+}
+
+.launch-option__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+}
+
+.launch-option__textarea {
+  width: 100%;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  padding: 6px 8px;
+  background: var(--bg-input, color-mix(in srgb, var(--fg) 5%, var(--bg)));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  resize: vertical;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.launch-option__textarea:focus {
+  border-color: var(--accent, #FF3E3E);
+}
+
+.launch-option__hint {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  font-style: italic;
 }
 
 .session-item__resume {

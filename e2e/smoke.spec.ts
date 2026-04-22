@@ -62,18 +62,19 @@ test('window loads and is titled', async () => {
   expect(await window.isVisible('body')).toBe(true);
 });
 
-test('TopSwitcher renders with three nav buttons', async () => {
+test('TopSwitcher renders four nav buttons: History, Chats, Branches, Agents', async () => {
   const nav = window.locator('.top-switcher__nav .ts-nav');
-  await expect(nav).toHaveCount(3);
-  await expect(nav.nth(0)).toHaveText('History');
-  await expect(nav.nth(1)).toHaveText('Branches');
-  await expect(nav.nth(2)).toHaveText('Agents');
+  await expect(nav).toHaveCount(4);
+  await expect(nav.nth(0)).toHaveText(/History/);
+  await expect(nav.nth(1)).toHaveText(/Chats/);
+  await expect(nav.nth(2)).toHaveText(/Branches/);
+  await expect(nav.nth(3)).toHaveText(/Agents/);
 });
 
 test('History is the default view and shows folders + session list + preview', async () => {
   // History should be active on first launch
   const active = window.locator('.ts-nav--active');
-  await expect(active).toHaveText('History');
+  await expect(active).toHaveText(/History/);
 
   // Three-pane layout is visible
   await expect(window.locator('.folders-pane')).toBeVisible();
@@ -115,17 +116,33 @@ test('Terminal defaults persist after save', async () => {
 
 test('Switch to Branches view — tiling layout mounts', async () => {
   await window.locator('.ts-nav', { hasText: 'Branches' }).click();
-  // Sidebar or its collapsed toggle becomes visible — both are branches-specific
-  // Just check that the Branches tab is active and history panel is gone.
-  await expect(window.locator('.ts-nav--active')).toHaveText('Branches');
+  await expect(window.locator('.ts-nav--active')).toHaveText(/Branches/);
   await expect(window.locator('.sessions-panel')).toHaveCount(0);
 });
 
 test('Hotkey Ctrl+H returns to History', async () => {
-  // From Branches → press Ctrl+H
   await window.keyboard.press('Control+h');
   await window.waitForTimeout(200);
-  await expect(window.locator('.ts-nav--active')).toHaveText('History');
+  await expect(window.locator('.ts-nav--active')).toHaveText(/History/);
+});
+
+test('Chats tab shows empty state when no chats open', async () => {
+  await window.locator('.ts-nav', { hasText: 'Chats' }).click();
+  await expect(window.locator('.chats-area')).toBeVisible();
+  // Hint text visible when no chats
+  const hint = window.locator('.chats-area__hint');
+  await expect(hint).toBeVisible();
+});
+
+test('Launch options gear expands per-session inline form', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  const firstRow = window.locator('.session-item').first();
+  const hasRow = (await firstRow.count()) > 0;
+  test.skip(!hasRow, 'No sessions available to test launch options');
+  const gear = firstRow.locator('.session-item__gear');
+  await gear.click();
+  await expect(firstRow.locator('.session-item__launch-options')).toBeVisible();
+  await expect(firstRow.locator('.launch-option__textarea')).toBeVisible();
 });
 
 test('Create folder via inline input persists in folders pane', async () => {

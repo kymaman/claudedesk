@@ -21,11 +21,13 @@ import {
   sessionsError,
   loadSessions,
   renameSessionLocal,
-  resumeSession,
   filteredSessions,
   folders,
   activeFolderId,
   setActiveFolderId,
+  activeProjectPath,
+  setActiveProjectPath,
+  smartProjectGroups,
   loadFolders,
   createFolderAction,
   renameFolderAction,
@@ -36,6 +38,13 @@ import {
   type SessionItem,
   type FolderItem,
 } from '../store/sessions-history';
+import {
+  loadLaunchSettings,
+  saveLaunchSettings,
+  type LaunchSettings,
+} from '../store/launch-settings';
+import { openChatFromSession } from '../store/chats';
+import { setMainView } from '../store/mainView';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
@@ -158,11 +167,18 @@ export function SessionsHistoryPanel(props: Props) {
 
           <FolderRow
             label="All sessions"
-            active={activeFolderId() === null}
-            onClick={() => setActiveFolderId(null)}
+            active={activeFolderId() === null && activeProjectPath() === null}
+            onClick={() => {
+              setActiveFolderId(null);
+              setActiveProjectPath(null);
+            }}
             count={sessions().length}
             highlight={false}
           />
+
+          <Show when={folders().length > 0}>
+            <div class="folders-pane__section-title">My folders</div>
+          </Show>
           <For each={folders()}>
             {(folder) => (
               <FolderRowCustom
@@ -170,7 +186,10 @@ export function SessionsHistoryPanel(props: Props) {
                 active={activeFolderId() === folder.id}
                 highlight={draggedFolderTarget() === folder.id}
                 count={sessions().filter((s) => s.folderIds.includes(folder.id)).length}
-                onClick={() => setActiveFolderId(folder.id)}
+                onClick={() => {
+                  setActiveFolderId(folder.id);
+                  setActiveProjectPath(null);
+                }}
                 onDragEnter={() => setDraggedFolderTarget(folder.id)}
                 onDragLeave={() => {
                   if (draggedFolderTarget() === folder.id) setDraggedFolderTarget(null);
@@ -190,6 +209,25 @@ export function SessionsHistoryPanel(props: Props) {
               />
             )}
           </For>
+
+          <Show when={smartProjectGroups().length > 0}>
+            <div class="folders-pane__section-title">By project</div>
+            <For each={smartProjectGroups()}>
+              {(group) => (
+                <button
+                  class={`folder-row folder-row--smart${activeProjectPath() === group.projectPath ? ' folder-row--active' : ''}`}
+                  onClick={() => {
+                    setActiveProjectPath(group.projectPath);
+                    setActiveFolderId(null);
+                  }}
+                  title={group.projectPath}
+                >
+                  <span class="folder-row__label">{group.basename}</span>
+                  <span class="folder-row__count">{group.count}</span>
+                </button>
+              )}
+            </For>
+          </Show>
         </aside>
 
         <div class="sessions-panel__list">
@@ -315,8 +353,20 @@ function SessionRow(props: {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal('');
   const [opening, setOpening] = createSignal(false);
+  const [showSettings, setShowSettings] = createSignal(false);
   const agents = createMemo(() => claudeAgents());
-  const [selectedAgentId, setSelectedAgentId] = createSignal<string>('claude-opus-4-7');
+
+  // Load persisted launch settings for this session (defaults to opus-4.7 + no flags)
+  const [settings, setSettings] = createSignal<LaunchSettings>({
+    agentId: 'claude-opus-4-7',
+    extraFlags: [],
+    skipPermissions: false,
+  });
+  onMount(async () => {
+    const saved = await loadLaunchSettings(props.session.sessionId);
+    if (saved) setSettings(saved);
+  });
+
   let inputRef: HTMLInputElement | undefined;
 
   function startEdit() {
@@ -332,9 +382,19 @@ function SessionRow(props: {
     e.stopPropagation();
     if (opening()) return;
     setOpening(true);
-    const taskId = await resumeSession(props.session, { agentId: selectedAgentId() });
-    setOpening(false);
-    if (taskId) props.onClose();
+    try {
+      openChatFromSession(props.session, settings());
+      setMainView('chats');
+    } catch (err) {
+      console.error('[SessionRow] openChat failed:', err);
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  async function persistSettings(next: LaunchSettings) {
+    setSettings(next);
+    await saveLaunchSettings(props.session.sessionId, next);
   }
 
   async function commitEdit() {
@@ -357,8 +417,9 @@ function SessionRow(props: {
 
   function handleDragStart(e: DragEvent) {
     if (!e.dataTransfer) return;
+    // Only the custom mime so the global GitHub-URL DropOverlay does not fire
+    // (it triggers on text/plain or text/uri-list).
     e.dataTransfer.setData(DRAG_MIME, props.session.sessionId);
-    e.dataTransfer.setData('text/plain', props.session.title);
     e.dataTransfer.effectAllowed = 'copy';
   }
 
@@ -408,11 +469,11 @@ function SessionRow(props: {
         <span class="session-item__date">{props.session.date}</span>
         <select
           class="session-item__version"
-          value={selectedAgentId()}
+          value={settings().agentId}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => {
             e.stopPropagation();
-            setSelectedAgentId(e.currentTarget.value);
+            void persistSettings({ ...settings(), agentId: e.currentTarget.value });
           }}
           title="CLI version to resume with"
         >
@@ -421,10 +482,20 @@ function SessionRow(props: {
           </For>
         </select>
         <button
+          class="session-item__gear"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowSettings((v) => !v);
+          }}
+          title="Launch options (flags, skip permissions)"
+        >
+          ⚙
+        </button>
+        <button
           class="session-item__resume"
           onClick={handleResume}
           disabled={opening()}
-          title={`Resume with ${selectedAgentId()}`}
+          title={`Resume with ${settings().agentId}`}
         >
           {opening() ? '…' : '▶'}
         </button>
@@ -454,6 +525,44 @@ function SessionRow(props: {
               );
             }}
           </For>
+        </div>
+      </Show>
+      <Show when={showSettings()}>
+        <div
+          class="session-item__launch-options"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <label class="launch-option">
+            <input
+              type="checkbox"
+              checked={settings().skipPermissions}
+              onChange={(e) =>
+                void persistSettings({ ...settings(), skipPermissions: e.currentTarget.checked })
+              }
+            />
+            <span>Skip permissions (--dangerously-skip-permissions)</span>
+          </label>
+          <label class="launch-option launch-option--full">
+            <span class="launch-option__label">Extra flags (one per line)</span>
+            <textarea
+              class="launch-option__textarea"
+              rows={3}
+              value={settings().extraFlags.join('\n')}
+              placeholder="--model sonnet&#10;--verbose"
+              onInput={(e) =>
+                void persistSettings({
+                  ...settings(),
+                  extraFlags: e.currentTarget.value
+                    .split(/\r?\n/)
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </label>
+          <div class="launch-option__hint">
+            Saved per-session. Applied automatically every time you resume this chat.
+          </div>
         </div>
       </Show>
     </div>

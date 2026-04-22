@@ -67,6 +67,9 @@ const [_folders, _setFolders] = createRoot<RootSig<FolderItem[]>>(() =>
 const [_activeFolderId, _setActiveFolderId] = createRoot<RootSig<string | null>>(() =>
   createSignal<string | null>(null),
 );
+const [_activeProjectPath, _setActiveProjectPath] = createRoot<RootSig<string | null>>(() =>
+  createSignal<string | null>(null),
+);
 
 export const sessions = _sessions;
 export const setSessions = _setSessions;
@@ -79,6 +82,27 @@ export const setSessionsError = _setSessionsError;
 export const folders = _folders;
 export const activeFolderId = _activeFolderId;
 export const setActiveFolderId = _setActiveFolderId;
+export const activeProjectPath = _activeProjectPath;
+export const setActiveProjectPath = _setActiveProjectPath;
+
+/** Smart-folder auto-groups derived from the unique project paths on disk. */
+export function smartProjectGroups(): { projectPath: string; basename: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const s of sessions()) {
+    counts.set(s.projectPath, (counts.get(s.projectPath) ?? 0) + 1);
+  }
+  const out: { projectPath: string; basename: string; count: number }[] = [];
+  for (const [projectPath, count] of counts) {
+    const basename =
+      projectPath
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .pop() ?? projectPath;
+    out.push({ projectPath, basename, count });
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -114,9 +138,13 @@ export async function fetchSessionPreview(filePath: string): Promise<SessionPrev
 export function filteredSessions(): SessionItem[] {
   const q = searchQuery().toLowerCase().trim();
   const folderId = activeFolderId();
+  const projectPath = activeProjectPath();
   let list = sessions();
   if (folderId) {
     list = list.filter((s) => s.folderIds.includes(folderId));
+  }
+  if (projectPath) {
+    list = list.filter((s) => s.projectPath === projectPath);
   }
   if (q) {
     list = list.filter(

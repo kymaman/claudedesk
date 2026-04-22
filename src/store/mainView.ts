@@ -6,14 +6,14 @@
 
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 
-export type MainView = 'history' | 'branches' | 'agents';
+export type MainView = 'history' | 'branches' | 'agents' | 'chats';
 
 const STORAGE_KEY = 'claudedesk.mainView';
 
 function loadInitial(): MainView {
   if (typeof localStorage === 'undefined') return 'history';
   const v = localStorage.getItem(STORAGE_KEY);
-  if (v === 'branches' || v === 'agents' || v === 'history') return v;
+  if (v === 'branches' || v === 'agents' || v === 'history' || v === 'chats') return v;
   return 'history';
 }
 

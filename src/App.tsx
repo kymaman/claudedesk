@@ -10,6 +10,7 @@ import { TilingLayout } from './components/TilingLayout';
 import { TopSwitcher } from './components/TopSwitcher';
 import { SessionsHistoryPanel } from './components/SessionsHistoryPanel';
 import { AgentsView } from './components/AgentsView';
+import { ChatsArea } from './components/ChatsArea';
 import { mainView, setMainView } from './store/mainView';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { HelpDialog } from './components/HelpDialog';
@@ -132,9 +133,11 @@ function App() {
   }
 
   // Can't inspect data during dragenter/dragover — only check types exist.
-  // Exclude file drags (OS file manager, desktop icons) to avoid false positives.
+  // Exclude file drags (OS file manager, desktop icons) and internal drags
+  // (session rows from History) to avoid false positives.
   function mayContainUrl(dt: DataTransfer): boolean {
     if (dt.types.includes('Files')) return false;
+    if (dt.types.includes('application/x-claudedesk-session-id')) return false;
     return dt.types.includes('text/uri-list') || dt.types.includes('text/plain');
   }
 
@@ -528,6 +531,13 @@ function App() {
       dialogSafe: false,
       handler: () => setMainView('agents'),
     });
+    registerShortcut({
+      key: 'k',
+      cmdOrCtrl: true,
+      global: true,
+      dialogSafe: false,
+      handler: () => setMainView('chats'),
+    });
 
     // Zoom in/out: variants for keyboard layouts where matches() needs an
     // exact shift-state match (so each case needs its own registration).
@@ -737,6 +747,9 @@ function App() {
           <div style={{ flex: '1', display: 'flex', overflow: 'hidden', 'min-height': '0' }}>
             <Show when={mainView() === 'history'}>
               <SessionsHistoryPanel />
+            </Show>
+            <Show when={mainView() === 'chats'}>
+              <ChatsArea />
             </Show>
             <Show when={mainView() === 'agents'}>
               <AgentsView />

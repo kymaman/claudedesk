@@ -73,6 +73,8 @@ import {
   deleteFolder,
   addSessionToFolder,
   removeSessionFromFolder,
+  getLaunchSettings,
+  setLaunchSettings,
 } from './session-history.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
@@ -887,6 +889,24 @@ export function registerAllHandlers(win: BrowserWindow): void {
     assertString(args.sessionId, 'sessionId');
     assertString(args.folderId, 'folderId');
     removeSessionFromFolder({ sessionId: args.sessionId, folderId: args.folderId });
+  });
+
+  ipcMain.handle(IPC.GetLaunchSettings, (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    return getLaunchSettings(args.sessionId);
+  });
+
+  ipcMain.handle(IPC.SetLaunchSettings, (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    assertString(args.agentId, 'agentId');
+    const extraFlags = Array.isArray(args.extraFlags)
+      ? (args.extraFlags as unknown[]).filter((f): f is string => typeof f === 'string')
+      : [];
+    setLaunchSettings(args.sessionId, {
+      agentId: args.agentId,
+      extraFlags,
+      skipPermissions: Boolean(args.skipPermissions),
+    });
   });
 
   // --- Forward window events to renderer ---

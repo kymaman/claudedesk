@@ -126,6 +126,9 @@ const ALLOWED_CHANNELS = new Set([
   'delete_folder',
   'add_session_to_folder',
   'remove_session_from_folder',
+  // Launch settings
+  'get_launch_settings',
+  'set_launch_settings',
 ]);
 
 function isAllowedChannel(channel) {

@@ -89,8 +89,55 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_folder_map_folder ON session_folder_map(folder_id);
     CREATE INDEX IF NOT EXISTS idx_folder_map_session ON session_folder_map(session_id);
+    CREATE TABLE IF NOT EXISTS session_launch_settings (
+      session_id       TEXT PRIMARY KEY,
+      agent_id         TEXT NOT NULL,
+      extra_flags_json TEXT NOT NULL DEFAULT '[]',
+      skip_permissions INTEGER NOT NULL DEFAULT 0,
+      updated_at       INTEGER NOT NULL
+    );
   `);
   return _db;
+}
+
+export interface LaunchSettings {
+  agentId: string;
+  extraFlags: string[];
+  skipPermissions: boolean;
+}
+
+export function getLaunchSettings(sessionId: string): LaunchSettings | null {
+  const db = getDb();
+  const row = db
+    .prepare<
+      [string],
+      { agent_id: string; extra_flags_json: string; skip_permissions: number }
+    >(
+      'SELECT agent_id, extra_flags_json, skip_permissions FROM session_launch_settings WHERE session_id = ?',
+    )
+    .get(sessionId);
+  if (!row) return null;
+  let flags: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(row.extra_flags_json);
+    if (Array.isArray(parsed)) {
+      flags = parsed.filter((f: unknown): f is string => typeof f === 'string');
+    }
+  } catch {
+    /* fallthrough with empty flags */
+  }
+  return {
+    agentId: row.agent_id,
+    extraFlags: flags,
+    skipPermissions: row.skip_permissions === 1,
+  };
+}
+
+export function setLaunchSettings(sessionId: string, s: LaunchSettings): void {
+  const db = getDb();
+  db.prepare(
+    'INSERT OR REPLACE INTO session_launch_settings (session_id, agent_id, extra_flags_json, skip_permissions, updated_at) VALUES (?, ?, ?, ?, ?)',
+  ).run(sessionId, s.agentId, JSON.stringify(s.extraFlags), s.skipPermissions ? 1 : 0, Date.now());
 }
 
 interface CachedSummary {

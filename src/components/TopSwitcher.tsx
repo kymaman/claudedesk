@@ -9,6 +9,7 @@
 import { For, Show } from 'solid-js';
 import { store, setActiveTask, toggleNewTaskDialog } from '../store/store';
 import { mainView, setMainView, type MainView } from '../store/mainView';
+import { openChats, activeChatId, setActiveChatId, closeChat } from '../store/chats';
 import './TopSwitcher.css';
 
 interface NavItem {
@@ -19,8 +20,9 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { id: 'history', label: 'History', hotkey: '⌃H' },
-  { id: 'branches', label: 'Branches', hotkey: '⌃B' },
-  { id: 'agents', label: 'Agents', hotkey: '⌃A' },
+  { id: 'chats', label: 'Chats', hotkey: '⌃K' },
+  { id: 'branches', label: 'Branches', hotkey: '⌃⇧B' },
+  { id: 'agents', label: 'Agents', hotkey: '⌃J' },
 ];
 
 export function TopSwitcher() {
@@ -40,6 +42,9 @@ export function TopSwitcher() {
               title={`${item.label} (${item.hotkey})`}
             >
               {item.label}
+              <Show when={item.id === 'chats' && openChats().length > 0}>
+                <span class="ts-mode__count">{openChats().length}</span>
+              </Show>
             </button>
           )}
         </For>
@@ -48,33 +53,59 @@ export function TopSwitcher() {
       <div class="top-switcher__sep" />
 
       <div class="top-switcher__chats" title="Open chats">
-        <For each={activeTasks()} fallback={<span class="ts-empty">No open chats</span>}>
-          {(task) => (
+        {/* History chats — click to focus, × to close */}
+        <For each={openChats()}>
+          {(chat) => (
             <button
-              class={`ts-chip ${store.activeTaskId === task.id ? 'ts-chip--active' : ''}`}
+              class={`ts-chip ${activeChatId() === chat.id ? 'ts-chip--active' : ''}`}
               onClick={() => {
-                setActiveTask(task.id);
-                setMainView('branches');
+                setActiveChatId(chat.id);
+                setMainView('chats');
               }}
-              title={`${task.name} · ${task.branchName}`}
+              title={`${chat.title} · ${chat.cwd}`}
             >
               <span class="ts-chip__name">
-                {task.name.length > 24 ? task.name.slice(0, 22) + '…' : task.name}
+                {chat.title.length > 22 ? chat.title.slice(0, 20) + '…' : chat.title}
+              </span>
+              <span
+                class="ts-chip__close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeChat(chat.id);
+                }}
+              >
+                ×
               </span>
             </button>
           )}
         </For>
-        <Show when={activeTasks().length > 0 || mainView() === 'branches'}>
+
+        {/* Branches tasks — only when on Branches view to reduce clutter */}
+        <Show when={mainView() === 'branches'}>
+          <For each={activeTasks()}>
+            {(task) => (
+              <button
+                class={`ts-chip ${store.activeTaskId === task.id ? 'ts-chip--active' : ''}`}
+                onClick={() => setActiveTask(task.id)}
+                title={`Branch task: ${task.name} · ${task.branchName}`}
+              >
+                <span class="ts-chip__name">
+                  {task.name.length > 22 ? task.name.slice(0, 20) + '…' : task.name}
+                </span>
+              </button>
+            )}
+          </For>
           <button
             class="ts-chip ts-chip--add"
-            onClick={() => {
-              setMainView('branches');
-              toggleNewTaskDialog(true);
-            }}
-            title="New chat"
+            onClick={() => toggleNewTaskDialog(true)}
+            title="New Branches task (worktree)"
           >
-            + New
+            + Task
           </button>
+        </Show>
+
+        <Show when={openChats().length === 0 && mainView() !== 'branches'}>
+          <span class="ts-empty">No open chats — click a session in History to start one</span>
         </Show>
       </div>
     </div>

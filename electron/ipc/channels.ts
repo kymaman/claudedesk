@@ -141,4 +141,8 @@ export enum IPC {
   DeleteFolder = 'delete_folder',
   AddSessionToFolder = 'add_session_to_folder',
   RemoveSessionFromFolder = 'remove_session_from_folder',
+
+  // Launch settings
+  GetLaunchSettings = 'get_launch_settings',
+  SetLaunchSettings = 'set_launch_settings',
 }

@@ -14,6 +14,7 @@ import { resolvedBindings } from '../store/keybindings';
 import { matchesKeyEvent } from '../lib/keybindings';
 import { store, setTaskLastInputAt } from '../store/store';
 import { terminalDefaults } from '../store/terminal-defaults';
+import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import type { PtyOutput } from '../ipc/types';
 
@@ -543,22 +544,16 @@ export function TerminalView(props: TerminalViewProps) {
     }
 
     // Merge global Terminal Defaults (from Agents view) with task-specific props.
-    // Flags: append after task args — user-level defaults come after agent-level ones,
-    // so late-position flags can override earlier ones if claude supports it.
-    // Env: defaults are base, task env overrides.
+    // Merge rules live in lib/terminal-spawn-merge.ts and are unit-tested.
     const defaults = terminalDefaults();
-    const mergedArgs = [...(props.args ?? []), ...defaults.flags];
-    const mergedEnv = { ...defaults.env, ...(props.env ?? {}) };
-
+    const commandLooksClaude = /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(props.command ?? '');
     // Auto-trust folders: when the global App-preferences toggle is on, and
     // the command is a Claude binary, auto-append --dangerously-skip-permissions
     // so the user isn't prompted "Trust this folder?" on every resume.
-    const commandLooksClaude = /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(props.command ?? '');
-    if (store.autoTrustFolders && commandLooksClaude) {
-      if (!mergedArgs.includes('--dangerously-skip-permissions')) {
-        mergedArgs.push('--dangerously-skip-permissions');
-      }
-    }
+    const autoFlags =
+      store.autoTrustFolders && commandLooksClaude ? ['--dangerously-skip-permissions'] : [];
+    const mergedArgs = mergeSpawnArgs(props.args, defaults.flags, autoFlags);
+    const mergedEnv = mergeSpawnEnv(defaults, props.env);
 
     // Belt-and-braces fallback: some Claude variants still show the interactive
     // "Trust this folder?" Ink/blessed prompt even with the skip flag. Watch

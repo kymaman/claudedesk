@@ -7,7 +7,10 @@ release
 .idea
 .claude
 .DS_Store
-docs/
+# docs/ is ignored upstream — we keep the screenshots subfolder for README.
+docs/*
+!docs/screenshots/
+!docs/screenshots/**
 
 # Sandbox bind-mount artifacts from user home (not project files).
 # Root-anchored so legitimate nested files with these names are still tracked.

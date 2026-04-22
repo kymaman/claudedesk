@@ -10,7 +10,7 @@ import { TilingLayout } from './components/TilingLayout';
 import { TopSwitcher } from './components/TopSwitcher';
 import { SessionsHistoryPanel } from './components/SessionsHistoryPanel';
 import { AgentsView } from './components/AgentsView';
-import { ChatsArea } from './components/ChatsArea';
+import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { HelpDialog } from './components/HelpDialog';
@@ -744,13 +744,22 @@ function App() {
         </Show>
         <main style={{ flex: '1', display: 'flex', 'flex-direction': 'column', overflow: 'hidden' }}>
           <TopSwitcher />
+          <NewSessionBar />
           <div style={{ flex: '1', display: 'flex', overflow: 'hidden', 'min-height': '0' }}>
-            <Show when={mainView() === 'history'}>
+            {/* History + Chats share the same SessionsHistoryPanel tree so
+                that xterm tiles don't remount (and flash) when the user
+                flips between History and Chats tabs. The panel internally
+                switches layout based on mainView(). */}
+            <div
+              style={{
+                flex: '1',
+                display: mainView() === 'history' || mainView() === 'chats' ? 'flex' : 'none',
+                'min-width': '0',
+                'min-height': '0',
+              }}
+            >
               <SessionsHistoryPanel />
-            </Show>
-            <Show when={mainView() === 'chats'}>
-              <ChatsArea />
-            </Show>
+            </div>
             <Show when={mainView() === 'agents'}>
               <AgentsView />
             </Show>

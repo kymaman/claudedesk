@@ -4,7 +4,7 @@
  */
 
 import { For, Show, createSignal, createEffect } from 'solid-js';
-import { store, toggleSettingsDialog } from '../store/store';
+import { store, toggleSettingsDialog, setAutoTrustFolders } from '../store/store';
 import {
   terminalDefaults,
   setTerminalFlags,
@@ -65,7 +65,7 @@ export function AgentsView() {
     <div class="agents-view">
       <div class="agents-view__scroller">
         <div class="agents-view__header">
-          <h1 class="agents-view__h1">Settings</h1>
+          <h1 class="agents-view__h1">Agents &amp; Settings</h1>
           <button
             class="agents-view__apprefs"
             onClick={() => toggleSettingsDialog()}
@@ -74,6 +74,64 @@ export function AgentsView() {
             App preferences…
           </button>
         </div>
+
+        <section class="agents-section">
+          <h2 class="agents-section__title">CLI agents</h2>
+          <p class="agents-section__desc">
+            Built-in + custom CLI agents. Each can be used to resume sessions from History or
+            start new Branches tasks. Click a session&apos;s ▶ to launch it with the agent you pick.
+          </p>
+          <div class="agents-list">
+            <For each={store.availableAgents}>
+              {(agent) => (
+                <div class="agent-card">
+                  <div class="agent-card__head">
+                    <span class="agent-card__name">{agent.name}</span>
+                    <span
+                      class={`agent-card__status ${
+                        agent.available === false ? 'is-missing' : 'is-ok'
+                      }`}
+                      title={agent.available === false ? 'Not found in PATH' : 'Available'}
+                    >
+                      {agent.available === false ? '✕ missing' : '● ready'}
+                    </span>
+                  </div>
+                  <div class="agent-card__cmd" title={agent.command}>
+                    {agent.command}
+                  </div>
+                  <Show when={agent.description}>
+                    <div class="agent-card__desc">{agent.description}</div>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </div>
+          <h3 class="agents-section__subtitle">Custom agents</h3>
+          <CustomAgentEditor />
+        </section>
+
+        <section class="agents-section agents-section--accent">
+          <h2 class="agents-section__title">Auto-trust folders</h2>
+          <p class="agents-section__desc">
+            Appends <code>--dangerously-skip-permissions</code> to every Claude chat so you
+            never have to confirm "Trust this folder?" manually.
+          </p>
+          <label class="launch-option">
+            <input
+              type="checkbox"
+              checked={store.autoTrustFolders}
+              onChange={(e) => setAutoTrustFolders(e.currentTarget.checked)}
+            />
+            <span>
+              Auto-accept "Trust this folder?" prompts
+              <Show when={store.autoTrustFolders}>
+                <span class="defaults-flash" style={{ 'margin-left': '8px' }}>
+                  ✓ enabled
+                </span>
+              </Show>
+            </span>
+          </label>
+        </section>
 
         <section class="agents-section agents-section--accent">
           <h2 class="agents-section__title">Terminal defaults · applied to every chat</h2>
@@ -200,56 +258,6 @@ export function AgentsView() {
           </p>
         </section>
 
-        <section class="agents-section">
-          <h2 class="agents-section__title">CLI agents</h2>
-          <p class="agents-section__desc">
-            Built-in + custom CLI agents. Each can be used to resume sessions from History or
-            start new Branches tasks. The &quot;Claude Code (Opus 4.6/4.7)&quot; presets point
-            directly at the two installed claude binaries on this machine.
-          </p>
-          <div class="agents-list">
-            <For each={store.availableAgents}>
-              {(agent) => (
-                <div class="agent-card">
-                  <div class="agent-card__head">
-                    <span class="agent-card__name">{agent.name}</span>
-                    <span
-                      class={`agent-card__status ${
-                        agent.available === false ? 'is-missing' : 'is-ok'
-                      }`}
-                      title={agent.available === false ? 'Not found in PATH' : 'Available'}
-                    >
-                      {agent.available === false ? '✕ missing' : '● ready'}
-                    </span>
-                  </div>
-                  <div class="agent-card__cmd" title={agent.command}>
-                    {agent.command}
-                  </div>
-                  <Show when={agent.description}>
-                    <div class="agent-card__desc">{agent.description}</div>
-                  </Show>
-                  <Show when={agent.resume_args.length > 0 || agent.skip_permissions_args.length > 0}>
-                    <div class="agent-card__flags">
-                      <Show when={agent.resume_args.length > 0}>
-                        <span class="agent-card__flag">
-                          resume: <code>{agent.resume_args.join(' ')}</code>
-                        </span>
-                      </Show>
-                      <Show when={agent.skip_permissions_args.length > 0}>
-                        <span class="agent-card__flag">
-                          yolo: <code>{agent.skip_permissions_args.join(' ')}</code>
-                        </span>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-              )}
-            </For>
-          </div>
-
-          <h3 class="agents-section__subtitle">Custom agents</h3>
-          <CustomAgentEditor />
-        </section>
       </div>
     </div>
   );

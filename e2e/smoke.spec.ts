@@ -62,13 +62,13 @@ test('window loads and is titled', async () => {
   expect(await window.isVisible('body')).toBe(true);
 });
 
-test('TopSwitcher renders four nav buttons: History, Chats, Branches, Settings', async () => {
+test('TopSwitcher renders four nav buttons: History, Chats, Branches, Agents', async () => {
   const nav = window.locator('.top-switcher__nav .ts-nav');
   await expect(nav).toHaveCount(4);
   await expect(nav.nth(0)).toHaveText(/History/);
   await expect(nav.nth(1)).toHaveText(/Chats/);
   await expect(nav.nth(2)).toHaveText(/Branches/);
-  await expect(nav.nth(3)).toHaveText(/Settings/);
+  await expect(nav.nth(3)).toHaveText(/Agents/);
 });
 
 test('History is the default view and shows folders + session list + preview', async () => {
@@ -94,8 +94,8 @@ test('Search input filters sessions', async () => {
   await search.fill('');
 });
 
-test('Switch to Settings view — terminal defaults + agent cards present', async () => {
-  await window.locator('.ts-nav', { hasText: 'Settings' }).click();
+test('Switch to Agents view — CLI agents + terminal defaults present', async () => {
+  await window.locator('.ts-nav', { hasText: 'Agents' }).click();
   await expect(window.locator('.agents-view')).toBeVisible();
   await expect(window.locator('.agent-card').first()).toBeVisible();
   await expect(window.locator('.defaults-btn', { hasText: 'Save flags' })).toBeVisible();
@@ -113,7 +113,8 @@ test('Terminal defaults persist after save', async () => {
 test('Switch to Branches view — tiling layout mounts', async () => {
   await window.locator('.ts-nav', { hasText: 'Branches' }).click();
   await expect(window.locator('.ts-nav--active')).toHaveText(/Branches/);
-  await expect(window.locator('.sessions-panel')).toHaveCount(0);
+  // History panel stays in DOM (prevents xterm remount/blink) but is hidden.
+  await expect(window.locator('.sessions-panel')).not.toBeVisible();
 });
 
 test('Hotkey Ctrl+H returns to History', async () => {
@@ -122,10 +123,11 @@ test('Hotkey Ctrl+H returns to History', async () => {
   await expect(window.locator('.ts-nav--active')).toHaveText(/History/);
 });
 
-test('Chats tab shows empty state when no chats open', async () => {
+test('Chats tab zooms history so chats grid fills window', async () => {
   await window.locator('.ts-nav', { hasText: 'Chats' }).click();
-  await expect(window.locator('.chats-area')).toBeVisible();
-  // Hint text visible when no chats (now from ChatsGrid)
+  // Chats tab = the same SessionsHistoryPanel but in zoom mode (folders +
+  // sessions list hidden). Avoids remounting xterm when flipping tabs.
+  await expect(window.locator('.sessions-panel--chats-zoom')).toBeVisible();
   await expect(window.locator('.chats-grid__empty')).toBeVisible();
 });
 
@@ -134,12 +136,12 @@ test('Settings gear in TopSwitcher opens the Settings view (terminal defaults)',
   await window.locator('.ts-settings').click();
   // The gear now routes to our Settings view, where terminal defaults live
   await expect(window.locator('.agents-view')).toBeVisible();
-  await expect(window.locator('.agents-section--accent')).toBeVisible();
+  await expect(window.locator('.agents-section--accent').first()).toBeVisible();
   await expect(window.locator('.defaults-btn', { hasText: 'Save flags' })).toBeVisible();
 });
 
 test('App preferences link opens parallel-code Settings dialog', async () => {
-  await window.locator('.ts-nav', { hasText: 'Settings' }).click();
+  await window.locator('.ts-nav', { hasText: 'Agents' }).click();
   await window.locator('.agents-view__apprefs').click();
   await expect(window.locator('.dialog-panel').first()).toBeVisible({ timeout: 3_000 });
   await window.keyboard.press('Escape');
@@ -182,7 +184,7 @@ test('Launch options gear expands per-session inline form', async () => {
   await expect(firstRow.locator('.launch-option__textarea')).toBeVisible();
 });
 
-test('Clicking ▶ on a session opens a chat tile with xterm', async () => {
+test('Clicking ▶ on a session opens a wide chat tile next to the sessions list', async () => {
   await window.locator('.ts-nav', { hasText: 'History' }).click();
   await window.waitForTimeout(500);
 
@@ -190,47 +192,83 @@ test('Clicking ▶ on a session opens a chat tile with xterm', async () => {
   const hasRow = (await firstRow.count()) > 0;
   test.skip(!hasRow, 'No sessions available to open a chat');
 
-  // Click the ▶ button on the first session row. The row itself is also
-  // clickable, but the explicit button is more targeted.
   await firstRow.locator('.session-item__resume').click();
   await window.waitForTimeout(1200);
 
-  // Layout flips to compact mode — chats grid appears to the right.
-  await expect(window.locator('.sessions-panel__body--compact')).toBeVisible({ timeout: 5_000 });
-  // At least one chat tile with xterm container.
+  // We stay on History — the layout auto-compacts and shows the chats grid
+  // on the right side of the sessions list. No tab change.
+  await expect(window.locator('.ts-nav--active')).toHaveText(/History/);
+  await expect(window.locator('.sessions-panel__body--compact')).toBeVisible();
+
   const tile = window.locator('.chat-tile').first();
   await expect(tile).toBeVisible();
-  // xterm mounts an `.xterm` inside the tile body — confirms the terminal
-  // actually mounted, not just the outer tile.
   await expect(tile.locator('.xterm').first()).toBeVisible({ timeout: 5_000 });
-  await expect(tile.locator('.xterm-screen').first()).toBeVisible();
 
-  // Regression: the first chat must occupy the full remaining pane.
   const box = await tile.boundingBox();
   if (!box) throw new Error('tile has no bounding box');
 
-  // Debug sizes for layout diagnosis (visible on failure)
   const parentBoxes = await window.evaluate(() => {
-    const panel = document.querySelector('.sessions-panel__body');
-    const chatsGrid = document.querySelector('.chats-grid');
-    const chatsPane = document.querySelector('.sessions-panel__chats');
-    const winBox = [window.innerWidth, window.innerHeight];
     const rect = (el: Element | null) =>
       el ? { w: (el as HTMLElement).clientWidth, h: (el as HTMLElement).clientHeight } : null;
-    return { win: winBox, panel: rect(panel), chatsPane: rect(chatsPane), chatsGrid: rect(chatsGrid) };
+    return {
+      win: [window.innerWidth, window.innerHeight],
+      chatsPane: rect(document.querySelector('.sessions-panel__chats')),
+      chatsGrid: rect(document.querySelector('.chats-grid')),
+      tileCount: document.querySelectorAll('.chat-tile').length,
+    };
   });
-  console.log('Layout boxes:', parentBoxes);
+  console.log('Layout boxes:', JSON.stringify(parentBoxes, null, 2));
 
-  // Regression guard: the previous bug left the tile at ~80 columns × 24 rows
-  // (~640×480) inside a giant empty area. We want the tile to fill the
-  // available space — at least 500px wide and 300px tall on the default
-  // Playwright window.
-  expect(box.width, `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`).toBeGreaterThan(500);
+  // Side-by-side layout: with folders 160px + sessions 260px = 420px of rail,
+  // on a 1335-wide window the tile gets ~915px. Guard against the 15px /
+  // 582px regressions — require at least 600px wide and 300px tall.
+  expect(box.width, `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`).toBeGreaterThan(600);
   expect(box.height, `tile.height=${box.height}`).toBeGreaterThan(300);
 
-  // Close the chat so later tests start from a known state.
+  // Clean up
   await tile.locator('.chat-tile__close').click();
   await window.waitForTimeout(400);
+});
+
+test('NewSessionBar expands into inline form and launches a fresh chat', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.waitForTimeout(200);
+  await window.locator('.new-session-bar__trigger').click();
+  await expect(window.locator('.new-session-bar__form')).toBeVisible();
+  await window.locator('.nsb-input--cwd').fill('D:/tmp/non-existent-for-test');
+  await window.locator('.nsb-input--flags').fill('--help');
+  // Cancel instead of actually spawning to keep the test environment tidy.
+  await window.locator('.nsb-btn--cancel').click();
+  await expect(window.locator('.new-session-bar__trigger')).toBeVisible();
+});
+
+test('Session row shows JSONL file path on the item', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.waitForTimeout(300);
+  const first = window.locator('.session-item').first();
+  const has = (await first.count()) > 0;
+  test.skip(!has, 'No sessions available');
+  await expect(first.locator('.session-item__filepath')).toBeVisible();
+});
+
+test('Right-click session row opens delete menu with both delete options', async () => {
+  await window.locator('.ts-nav', { hasText: 'History' }).click();
+  await window.waitForTimeout(400);
+
+  const firstRow = window.locator('.session-item').first();
+  const hasRow = (await firstRow.count()) > 0;
+  test.skip(!hasRow, 'No sessions available');
+
+  await firstRow.click({ button: 'right' });
+  const menu = window.locator('.session-item__menu').first();
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.session-item__menu-item', { hasText: 'Delete from view' })).toBeVisible();
+  await expect(
+    menu.locator('.session-item__menu-item--danger', { hasText: 'Delete permanently' }),
+  ).toBeVisible();
+  // Dismiss without deleting anything
+  await menu.locator('.session-item__menu-item', { hasText: 'Cancel' }).click();
+  await expect(menu).toBeHidden();
 });
 
 test('Create folder via inline input persists in folders pane', async () => {

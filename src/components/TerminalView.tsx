@@ -288,6 +288,26 @@ export function TerminalView(props: TerminalViewProps) {
     fitAddon.fit();
     registerTerminal(agentId, containerRef, fitAddon, term);
 
+    // Mount-time sizing race: Solid places the element in the DOM, but the
+    // browser may not have settled the layout pass when onMount() runs — so
+    // containerRef can report 0×0 and fit() collapses to xterm's 80×24 default.
+    // Re-fit on next frame and once more after fonts load. Each call is cheap
+    // and the FitAddon no-ops when the grid size hasn't changed.
+    requestAnimationFrame(() => {
+      try {
+        fitAddon?.fit();
+      } catch {
+        /* term may already be disposed */
+      }
+    });
+    setTimeout(() => {
+      try {
+        fitAddon?.fit();
+      } catch {
+        /* ignore */
+      }
+    }, 120);
+
     if (props.autoFocus) {
       term.focus();
     }
@@ -356,6 +376,11 @@ export function TerminalView(props: TerminalViewProps) {
         }
 
         props.onData?.(statusPayload);
+        try {
+          maybeAutoTrust(decoder.decode(statusPayload, { stream: true }));
+        } catch {
+          /* ignore decoder glitches */
+        }
         if (outputQueue.length > 0) {
           scheduleOutputFlush();
           return;
@@ -525,6 +550,48 @@ export function TerminalView(props: TerminalViewProps) {
     const mergedArgs = [...(props.args ?? []), ...defaults.flags];
     const mergedEnv = { ...defaults.env, ...(props.env ?? {}) };
 
+    // Auto-trust folders: when the global App-preferences toggle is on, and
+    // the command is a Claude binary, auto-append --dangerously-skip-permissions
+    // so the user isn't prompted "Trust this folder?" on every resume.
+    const commandLooksClaude =
+      /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(props.command ?? '');
+    if (store.autoTrustFolders && commandLooksClaude) {
+      if (!mergedArgs.includes('--dangerously-skip-permissions')) {
+        mergedArgs.push('--dangerously-skip-permissions');
+      }
+    }
+
+    // Belt-and-braces fallback: some Claude variants still show the interactive
+    // "Trust this folder?" Ink/blessed prompt even with the skip flag. Watch
+    // the terminal output for the pattern and auto-press Enter once we see it.
+    // Mirrors the pattern set from parallel-code's taskStatus.ts.
+    const TRUST_PATTERNS: RegExp[] = [
+      /\btrust\b.*\?/i,
+      /trust.*folder/i,
+      /confirm.*folder.*trust/i,
+    ];
+    const TRUST_EXCLUSIONS =
+      /\b(delet|remov|credential|secret|password|key|token|destro|format|drop)/i;
+    const ANSI_STRIP = /\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]/g;
+    let trustTail = '';
+    let lastTrustSendAt = 0;
+    function maybeAutoTrust(decoded: string) {
+      if (!store.autoTrustFolders || !commandLooksClaude) return;
+      const now = Date.now();
+      if (now - lastTrustSendAt < 2500) return; // cooldown
+      trustTail = (trustTail + decoded).slice(-2048);
+      const plain = trustTail.replace(ANSI_STRIP, '');
+      if (TRUST_EXCLUSIONS.test(plain)) return;
+      const hit = TRUST_PATTERNS.some((rx) => rx.test(plain));
+      if (!hit) return;
+      lastTrustSendAt = now;
+      trustTail = '';
+      invoke(IPC.WriteToAgent, { agentId, data: '\r' }).catch(() => {
+        /* swallow: worst case the user presses Enter manually */
+      });
+    }
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+
     invoke(IPC.SpawnAgent, {
       taskId,
       agentId,
@@ -597,7 +664,6 @@ export function TerminalView(props: TerminalViewProps) {
         height: '100%',
         overflow: 'hidden',
         padding: '4px 0 0 4px',
-        contain: 'strict',
       }}
     />
   );

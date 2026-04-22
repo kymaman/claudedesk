@@ -11,6 +11,7 @@ import { store } from './core';
 import { addProject } from './projects';
 import { createTask } from './tasks';
 import { filterState } from './session-filters';
+import { hiddenSessions } from './session-hide';
 import type { AgentDef } from '../ipc/types';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ export interface FolderItem {
   name: string;
   color?: string;
   position: number;
+  pinned: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +146,13 @@ export function filteredSessions(): SessionItem[] {
   const folderId = activeFolderId();
   const projectPath = activeProjectPath();
   const f = filterState();
+  const hidden = hiddenSessions();
   let list = sessions();
+
+  // Session-level hide (right-click → Delete from view)
+  if (hidden.size > 0) {
+    list = list.filter((s) => !hidden.has(s.sessionId));
+  }
 
   // Hide explicitly-suppressed projects (unless user is drilling into one)
   if (!projectPath && f.hiddenProjects.length > 0) {
@@ -267,6 +275,23 @@ export async function removeSessionFromFolderAction(
     );
   } catch (err) {
     console.warn('[sessions-history] removeSessionFromFolder failed:', err);
+  }
+}
+
+export async function pinFolderAction(id: string, pinned: boolean): Promise<void> {
+  try {
+    await invoke<void>(IPC.PinFolder, { id, pinned });
+    _setFolders((prev) => {
+      const next = prev.map((f) => (f.id === id ? { ...f, pinned } : f));
+      // Re-sort: pinned first, then by position/name
+      next.sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return a.position - b.position || a.name.localeCompare(b.name);
+      });
+      return next;
+    });
+  } catch (err) {
+    console.warn('[sessions-history] pinFolder failed:', err);
   }
 }
 

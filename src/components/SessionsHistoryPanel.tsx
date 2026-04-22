@@ -34,6 +34,7 @@ import {
   deleteFolderAction,
   addSessionToFolderAction,
   removeSessionFromFolderAction,
+  pinFolderAction,
   fetchSessionPreview,
   type SessionItem,
   type FolderItem,
@@ -51,6 +52,11 @@ import {
   toggleHiddenProject,
   type SortOrder,
 } from '../store/session-filters';
+import { mainView } from '../store/mainView';
+import { hideEmptyFolders, setHideEmptyFolders } from '../store/folder-prefs';
+import { hideSession } from '../store/session-hide';
+import { invoke } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
@@ -76,7 +82,10 @@ export function SessionsHistoryPanel(props: Props) {
   let newFolderInputRef: HTMLInputElement | undefined;
 
   // Compact mode when any chat is open: sessions rail + chats grid
-  const compact = () => openChats().length > 0;
+  const compact = () => openChats().length > 0 || mainView() === 'chats';
+  // Zoom mode = user explicitly switched to Chats tab. Folders + sessions
+  // list collapse so the chats grid fills the window.
+  const chatsZoom = () => mainView() === 'chats';
 
   onMount(() => {
     if (sessions().length === 0) void loadSessions();
@@ -102,7 +111,7 @@ export function SessionsHistoryPanel(props: Props) {
   }
 
   return (
-    <div class="sessions-panel">
+    <div class={`sessions-panel${chatsZoom() ? ' sessions-panel--chats-zoom' : ''}`}>
       <div class="sessions-panel__header">
         <span class="sessions-panel__title">History</span>
         <input
@@ -210,7 +219,13 @@ export function SessionsHistoryPanel(props: Props) {
           <Show when={folders().length > 0}>
             <div class="folders-pane__section-title">My folders</div>
           </Show>
-          <For each={folders()}>
+          <For
+            each={folders().filter((f) => {
+              if (!hideEmptyFolders()) return true;
+              const count = sessions().filter((s) => s.folderIds.includes(f.id)).length;
+              return count > 0 || f.pinned;
+            })}
+          >
             {(folder) => (
               <FolderRowCustom
                 folder={folder}
@@ -237,9 +252,22 @@ export function SessionsHistoryPanel(props: Props) {
                     await deleteFolderAction(folder.id);
                   }
                 }}
+                onPin={async () => {
+                  await pinFolderAction(folder.id, !folder.pinned);
+                }}
               />
             )}
           </For>
+
+          <div class="folders-pane__footer">
+            <button
+              class={`folders-pane__footer-btn ${hideEmptyFolders() ? 'is-active' : ''}`}
+              onClick={() => setHideEmptyFolders(!hideEmptyFolders())}
+              title="Hide folders that contain zero sessions (pinned folders stay visible)"
+            >
+              {hideEmptyFolders() ? '☑' : '☐'} Hide empty
+            </button>
+          </div>
 
           <Show when={smartProjectGroups().length > 0}>
             <div class="folders-pane__section-title">By project</div>
@@ -359,6 +387,7 @@ function FolderRowCustom(props: {
   onDrop: (sessionId: string) => Promise<void>;
   onRename: (newName: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  onPin: () => Promise<void>;
 }) {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal('');
@@ -409,6 +438,12 @@ function FolderRowCustom(props: {
     await props.onDelete();
   }
 
+  async function handlePin(e?: MouseEvent) {
+    e?.stopPropagation();
+    setMenuOpen(false);
+    await props.onPin();
+  }
+
   return (
     <button
       class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
@@ -429,7 +464,14 @@ function FolderRowCustom(props: {
     >
       <Show
         when={editing()}
-        fallback={<span class="folder-row__label">{props.folder.name}</span>}
+        fallback={
+          <span class="folder-row__label">
+            <Show when={props.folder.pinned}>
+              <span class="folder-row__pin" title="Pinned">★</span>
+            </Show>
+            {props.folder.name}
+          </span>
+        }
       >
         <input
           ref={inputRef}
@@ -452,6 +494,9 @@ function FolderRowCustom(props: {
       <span class="folder-row__count">{props.count}</span>
       <Show when={menuOpen()}>
         <div class="folder-row__menu" onClick={(e) => e.stopPropagation()}>
+          <button class="folder-row__menu-item" onClick={handlePin}>
+            {props.folder.pinned ? 'Unpin' : 'Pin to top'}
+          </button>
           <button class="folder-row__menu-item" onClick={beginRename}>
             Rename
           </button>
@@ -480,6 +525,7 @@ function SessionRow(props: {
   const [draft, setDraft] = createSignal('');
   const [opening, setOpening] = createSignal(false);
   const [showSettings, setShowSettings] = createSignal(false);
+  const [menuOpen, setMenuOpen] = createSignal(false);
   const agents = createMemo(() => claudeAgents());
 
   // Load persisted launch settings for this session (defaults to opus-4.7 + no flags)
@@ -510,8 +556,9 @@ function SessionRow(props: {
     setOpening(true);
     try {
       openChatFromSession(props.session, settings());
-      // Stay in History — the chats grid auto-appears on the right side
-      // thanks to `compact()` mode.
+      // Stay on History: the layout auto-compacts (folders + sessions rail
+      // on the left, chats grid on the right). User explicitly asked for
+      // the side-by-side view — do NOT jump to a full-screen Chats tab.
     } catch (err) {
       console.error('[SessionRow] openChat failed:', err);
     } finally {
@@ -572,6 +619,37 @@ function SessionRow(props: {
     await removeSessionFromFolderAction(props.session.sessionId, folderId);
   }
 
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen((v) => !v);
+  }
+
+  function handleHideFromView(e: MouseEvent) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    hideSession(props.session.sessionId);
+  }
+
+  async function handleDeletePermanent(e: MouseEvent) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    const ok = window.confirm(
+      `Permanently delete session JSONL file?\n\n${props.session.filePath}\n\nThis removes the file from disk AND all local metadata (alias, folder, launch settings). Cannot be undone.`,
+    );
+    if (!ok) return;
+    try {
+      await invoke(IPC.DeleteSessionFile, {
+        sessionId: props.session.sessionId,
+        filePath: props.session.filePath,
+      });
+      // Also hide locally in case the in-memory list doesn't refresh instantly
+      hideSession(props.session.sessionId);
+    } catch (err) {
+      window.alert(`Failed to delete: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   return (
     <div
       class={`session-item${editing() ? ' session-item--editing' : ''}`}
@@ -579,14 +657,18 @@ function SessionRow(props: {
       onDragStart={handleDragStart}
       onMouseEnter={() => props.onHover(props.session)}
       onClick={(e) => {
-        if (editing()) return;
+        if (editing() || menuOpen()) {
+          e.stopPropagation();
+          return;
+        }
         void handleResume(e);
       }}
       onDblClick={(e) => {
         e.stopPropagation();
         startEdit();
       }}
-      title="Click to resume · double-click to rename · drag to folder"
+      onContextMenu={handleContextMenu}
+      title="Click to resume · double-click to rename · right-click for delete menu"
     >
       <div class="session-item__title-row">
         <Show
@@ -640,6 +722,10 @@ function SessionRow(props: {
       <div class="session-item__project" title={props.session.projectPath}>
         {shortPath(props.session.projectPath)}
       </div>
+      <div class="session-item__filepath" title={props.session.filePath}>
+        <span class="session-item__filepath-label">file</span>
+        {shortPath(props.session.filePath)}
+      </div>
       <Show when={props.session.description}>
         {(desc) => <div class="session-item__desc">{desc()}</div>}
       </Show>
@@ -662,6 +748,28 @@ function SessionRow(props: {
               );
             }}
           </For>
+        </div>
+      </Show>
+      <Show when={menuOpen()}>
+        <div class="session-item__menu" onClick={(e) => e.stopPropagation()}>
+          <button class="session-item__menu-item" onClick={handleHideFromView}>
+            Delete from view
+          </button>
+          <button
+            class="session-item__menu-item session-item__menu-item--danger"
+            onClick={handleDeletePermanent}
+          >
+            Delete permanently (from disk)
+          </button>
+          <button
+            class="session-item__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+            }}
+          >
+            Cancel
+          </button>
         </div>
       </Show>
       <Show when={showSettings()}>
@@ -776,6 +884,14 @@ function PreviewPane(props: { session: SessionItem | null }) {
               <div class="preview-pane__title">{s().title}</div>
               <div class="preview-pane__meta">
                 {s().date} · {s().sessionId.slice(0, 8)}
+              </div>
+              <div class="preview-pane__path" title={s().filePath}>
+                <span class="preview-pane__path-label">JSONL</span>
+                <span class="preview-pane__path-value">{s().filePath}</span>
+              </div>
+              <div class="preview-pane__path" title={s().projectPath}>
+                <span class="preview-pane__path-label">cwd</span>
+                <span class="preview-pane__path-value">{s().projectPath}</span>
               </div>
             </div>
             <div class="preview-pane__body">

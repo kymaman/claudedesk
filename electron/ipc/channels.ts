@@ -145,4 +145,10 @@ export enum IPC {
   // Launch settings
   GetLaunchSettings = 'get_launch_settings',
   SetLaunchSettings = 'set_launch_settings',
+
+  // Folder pin
+  PinFolder = 'pin_folder',
+
+  // Hard delete a session file on disk (irreversible)
+  DeleteSessionFile = 'delete_session_file',
 }

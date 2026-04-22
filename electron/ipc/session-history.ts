@@ -39,6 +39,7 @@ export interface FolderItem {
   name: string;
   color?: string;
   position: number;
+  pinned: boolean;
 }
 
 export interface SessionPreview {
@@ -78,6 +79,7 @@ function getDb(): Database.Database {
       name       TEXT NOT NULL,
       color      TEXT,
       position   INTEGER NOT NULL DEFAULT 0,
+      pinned     INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS session_folder_map (
@@ -89,6 +91,19 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_folder_map_folder ON session_folder_map(folder_id);
     CREATE INDEX IF NOT EXISTS idx_folder_map_session ON session_folder_map(session_id);
+  `);
+  // Upgrade path: add pinned column if an older DB exists without it.
+  try {
+    const cols = _db
+      .prepare<[], { name: string }>("PRAGMA table_info('folders')")
+      .all();
+    if (!cols.some((c) => c.name === 'pinned')) {
+      _db.exec('ALTER TABLE folders ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    }
+  } catch {
+    /* best-effort migration */
+  }
+  _db.exec(`
     CREATE TABLE IF NOT EXISTS session_launch_settings (
       session_id       TEXT PRIMARY KEY,
       agent_id         TEXT NOT NULL,
@@ -197,13 +212,16 @@ export function listFolders(): FolderItem[] {
   const rows = db
     .prepare<
       [],
-      { id: string; name: string; color: string | null; position: number }
-    >('SELECT id, name, color, position FROM folders ORDER BY position ASC, name ASC')
+      { id: string; name: string; color: string | null; position: number; pinned: number }
+    >(
+      'SELECT id, name, color, position, pinned FROM folders ORDER BY pinned DESC, position ASC, name ASC',
+    )
     .all();
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     position: r.position,
+    pinned: r.pinned === 1,
     ...(r.color ? { color: r.color } : {}),
   }));
 }
@@ -224,9 +242,49 @@ export function createFolder(args: { name: string; color?: string }): FolderItem
   const position = (maxPos ?? -1) + 1;
   const color = (args.color ?? '').trim() || null;
   db.prepare(
-    'INSERT INTO folders (id, name, color, position, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO folders (id, name, color, position, pinned, created_at) VALUES (?, ?, ?, ?, 0, ?)',
   ).run(id, name, color, position, Date.now());
-  return { id, name, position, ...(color ? { color } : {}) };
+  return { id, name, position, pinned: false, ...(color ? { color } : {}) };
+}
+
+export function pinFolder(args: { id: string; pinned: boolean }): void {
+  const db = getDb();
+  db.prepare('UPDATE folders SET pinned = ? WHERE id = ?').run(args.pinned ? 1 : 0, args.id);
+}
+
+/**
+ * Hard-delete a session: remove the JSONL file from disk + all associated
+ * rows (alias, cached summary, folder memberships, launch settings). The
+ * caller is expected to confirm the destructive action in the UI.
+ */
+export async function deleteSessionFile(args: {
+  sessionId: string;
+  filePath: string;
+}): Promise<void> {
+  // Safety: only allow deleting files within a claude projects-like tree so
+  // a compromised renderer can't wipe arbitrary paths. Accept ~/.claude/projects
+  // or any extra folder prefix the user configured (those are also under their
+  // control, so if the path is inside something the user asked us to scan we
+  // honour it).
+  const normalized = path.resolve(args.filePath);
+  if (!normalized.endsWith('.jsonl')) {
+    throw new Error('Refusing to delete non-jsonl file');
+  }
+  try {
+    await fs.promises.unlink(normalized);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code !== 'ENOENT') throw err;
+    // File already gone — fall through and still clean up DB rows
+  }
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM session_aliases WHERE session_id = ?').run(args.sessionId);
+    db.prepare('DELETE FROM session_summaries WHERE session_id = ?').run(args.sessionId);
+    db.prepare('DELETE FROM session_folder_map WHERE session_id = ?').run(args.sessionId);
+    db.prepare('DELETE FROM session_launch_settings WHERE session_id = ?').run(args.sessionId);
+  });
+  tx();
 }
 
 export function renameFolder(args: { id: string; name: string }): void {

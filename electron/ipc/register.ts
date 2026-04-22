@@ -75,6 +75,8 @@ import {
   removeSessionFromFolder,
   getLaunchSettings,
   setLaunchSettings,
+  pinFolder,
+  deleteSessionFile,
 } from './session-history.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
@@ -907,6 +909,17 @@ export function registerAllHandlers(win: BrowserWindow): void {
       extraFlags,
       skipPermissions: Boolean(args.skipPermissions),
     });
+  });
+
+  ipcMain.handle(IPC.PinFolder, (_e, args) => {
+    assertString(args.id, 'id');
+    pinFolder({ id: args.id, pinned: Boolean(args.pinned) });
+  });
+
+  ipcMain.handle(IPC.DeleteSessionFile, (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    validatePath(args.filePath, 'filePath');
+    return deleteSessionFile({ sessionId: args.sessionId, filePath: args.filePath });
   });
 
   // --- Forward window events to renderer ---

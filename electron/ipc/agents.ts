@@ -12,13 +12,28 @@ interface AgentDef {
   prompt_ready_delay_ms?: number;
 }
 
+import path from 'path';
+import { homedir } from 'os';
 import { IS_WINDOWS } from '../platform.js';
 
-// Default Windows claude binaries (user can override via custom agents).
-const WIN_CLAUDE_47 =
-  'C:\\Users\\burmistrov\\.local\\bin\\claude.exe';
-const WIN_CLAUDE_46 =
-  'C:\\Users\\burmistrov\\AppData\\Local\\Microsoft\\WinGet\\Links\\claude.exe';
+// Default Windows claude binaries. Resolved against the current user's home
+// directory so the app ships with working defaults for the two common install
+// flavours — npm-global-to-.local and winget. Users with a different layout
+// can override via Agents view → Custom agents.
+const WIN_CLAUDE_47 = IS_WINDOWS
+  ? path.join(homedir(), '.local', 'bin', 'claude.exe')
+  : 'claude';
+const WIN_CLAUDE_46 = IS_WINDOWS
+  ? path.join(
+      homedir(),
+      'AppData',
+      'Local',
+      'Microsoft',
+      'WinGet',
+      'Links',
+      'claude.exe',
+    )
+  : 'claude';
 
 const DEFAULT_AGENTS: AgentDef[] = [
   {

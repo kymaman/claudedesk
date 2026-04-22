@@ -1,5 +1,7 @@
 param(
-  [string]$ProjectRoot = "D:\YandexDisk\Antigravity\ClaudeDesk"
+  # Defaults to the parent of this script's folder, so running the script
+  # from any clone of the repo creates a shortcut pointing there.
+  [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
 $desktop = [Environment]::GetFolderPath('Desktop')

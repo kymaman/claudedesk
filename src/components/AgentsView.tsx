@@ -4,7 +4,7 @@
  */
 
 import { For, Show, createSignal, createEffect } from 'solid-js';
-import { store } from '../store/store';
+import { store, toggleSettingsDialog } from '../store/store';
 import {
   terminalDefaults,
   setTerminalFlags,
@@ -64,6 +64,17 @@ export function AgentsView() {
   return (
     <div class="agents-view">
       <div class="agents-view__scroller">
+        <div class="agents-view__header">
+          <h1 class="agents-view__h1">Settings</h1>
+          <button
+            class="agents-view__apprefs"
+            onClick={() => toggleSettingsDialog()}
+            title="Open theme, terminal font, global scale, etc."
+          >
+            App preferences…
+          </button>
+        </div>
+
         <section class="agents-section agents-section--accent">
           <h2 class="agents-section__title">Terminal defaults · applied to every chat</h2>
           <p class="agents-section__desc">

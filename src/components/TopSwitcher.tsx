@@ -7,7 +7,7 @@
  */
 
 import { For, Show } from 'solid-js';
-import { store, setActiveTask, toggleNewTaskDialog, toggleSettingsDialog } from '../store/store';
+import { store, setActiveTask, toggleNewTaskDialog } from '../store/store';
 import { mainView, setMainView, type MainView } from '../store/mainView';
 import { openChats, activeChatId, setActiveChatId, closeChat } from '../store/chats';
 import './TopSwitcher.css';
@@ -111,8 +111,8 @@ export function TopSwitcher() {
 
       <button
         class="ts-settings"
-        onClick={() => toggleSettingsDialog()}
-        title="Settings (Ctrl+,)"
+        onClick={() => setMainView('agents')}
+        title="Settings — terminal defaults, agents, extra folders (Ctrl+J)"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
           <path d="M7.41 1.25a.75.75 0 0 1 1.18 0l.57.72c.23.29.6.43.96.36l.9-.18a.75.75 0 0 1 .88.75v.92c0 .37.2.7.53.89l.78.45a.75.75 0 0 1 .32 1.07l-.5.82a.93.93 0 0 0 0 .96l.5.82a.75.75 0 0 1-.32 1.07l-.78.45a.93.93 0 0 0-.53.89v.92a.75.75 0 0 1-.88.75l-.9-.18a1 1 0 0 0-.96.36l-.57.72a.75.75 0 0 1-1.18 0l-.57-.72a1 1 0 0 0-.96-.36l-.9.18a.75.75 0 0 1-.88-.75v-.92a.93.93 0 0 0-.53-.89l-.78-.45a.75.75 0 0 1-.32-1.07l.5-.82a.93.93 0 0 0 0-.96l-.5-.82a.75.75 0 0 1 .32-1.07l.78-.45a.93.93 0 0 0 .53-.89V2.9a.75.75 0 0 1 .88-.75l.9.18c.36.07.73-.07.96-.36l.57-.72ZM8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />

@@ -129,10 +129,18 @@ test('Chats tab shows empty state when no chats open', async () => {
   await expect(window.locator('.chats-grid__empty')).toBeVisible();
 });
 
-test('Settings gear in TopSwitcher opens Settings dialog', async () => {
+test('Settings gear in TopSwitcher opens the Settings view (terminal defaults)', async () => {
   await window.locator('.ts-nav', { hasText: 'History' }).click();
   await window.locator('.ts-settings').click();
-  // parallel-code Dialog uses .dialog-panel wrapper
+  // The gear now routes to our Settings view, where terminal defaults live
+  await expect(window.locator('.agents-view')).toBeVisible();
+  await expect(window.locator('.agents-section--accent')).toBeVisible();
+  await expect(window.locator('.defaults-btn', { hasText: 'Save flags' })).toBeVisible();
+});
+
+test('App preferences link opens parallel-code Settings dialog', async () => {
+  await window.locator('.ts-nav', { hasText: 'Settings' }).click();
+  await window.locator('.agents-view__apprefs').click();
   await expect(window.locator('.dialog-panel').first()).toBeVisible({ timeout: 3_000 });
   await window.keyboard.press('Escape');
 });

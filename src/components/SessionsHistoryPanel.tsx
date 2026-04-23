@@ -619,11 +619,9 @@ function SessionRow(props: {
     setTimeout(() => ghost.remove(), 0);
   }
 
-  function shortPath(p: string): string {
-    const sep = p.includes('\\') ? '\\' : '/';
-    const parts = p.split(sep);
-    if (parts.length <= 2) return p;
-    return '...' + sep + parts.slice(-2).join(sep);
+  /** Last non-empty path segment — used as a compact "project" label. */
+  function basename(p: string): string {
+    return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
   }
 
   async function handleRemoveFromFolder(folderId: string, e: MouseEvent) {
@@ -731,37 +729,35 @@ function SessionRow(props: {
           {opening() ? '…' : '▶'}
         </button>
       </div>
-      <div class="session-item__project" title={props.session.projectPath}>
-        {shortPath(props.session.projectPath)}
-      </div>
-      <div class="session-item__filepath" title={props.session.filePath}>
-        <span class="session-item__filepath-label">file</span>
-        {shortPath(props.session.filePath)}
-      </div>
       <Show when={props.session.description}>
         {(desc) => <div class="session-item__desc">{desc()}</div>}
       </Show>
-      <Show when={props.session.folderIds.length > 0}>
-        <div class="session-item__tags">
-          <For each={props.session.folderIds}>
-            {(fid) => {
-              const folder = folders().find((f) => f.id === fid);
-              if (!folder) return null;
-              return (
-                <span class="session-tag" title="Click × to remove from folder">
-                  <span>{folder.name}</span>
-                  <button
-                    class="session-tag__x"
-                    onClick={(e) => void handleRemoveFromFolder(fid, e)}
-                  >
-                    ×
-                  </button>
-                </span>
-              );
-            }}
-          </For>
-        </div>
-      </Show>
+      <div class="session-item__meta">
+        <Show when={props.session.folderIds.length > 0}>
+          <div class="session-item__tags">
+            <For each={props.session.folderIds}>
+              {(fid) => {
+                const folder = folders().find((f) => f.id === fid);
+                if (!folder) return null;
+                return (
+                  <span class="session-tag" title="Click × to remove from folder">
+                    <span>{folder.name}</span>
+                    <button
+                      class="session-tag__x"
+                      onClick={(e) => void handleRemoveFromFolder(fid, e)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
+        <span class="session-item__project" title={props.session.projectPath}>
+          {basename(props.session.projectPath)}
+        </span>
+      </div>
       <Show when={menuOpen()}>
         <div class="session-item__menu" onClick={(e) => e.stopPropagation()}>
           <button class="session-item__menu-item" onClick={handleHideFromView}>

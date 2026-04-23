@@ -176,7 +176,9 @@ export function AgentsView() {
               Environment variables
               <span class="defaults-hint">
                 one per line as <code>KEY=VALUE</code>. Example:{' '}
-                <code>HTTPS_PROXY=http://localhost:7890</code>
+                <code>HTTPS_PROXY=http://localhost:7890</code>. Pasting a shell line like{' '}
+                <code>$env:HTTPS_PROXY="..."</code> or <code>export HTTPS_PROXY='...'</code> also
+                works.
               </span>
             </label>
             <textarea

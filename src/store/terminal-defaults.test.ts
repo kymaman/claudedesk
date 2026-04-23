@@ -120,6 +120,50 @@ describe('parseEnvInput', () => {
     const { parseEnvInput } = await importTerminalDefaults();
     expect(parseEnvInput('A=1\r\nB=2')).toEqual({ A: '1', B: '2' });
   });
+
+  // Regression: a user pasted a PowerShell line straight out of their profile
+  // — `$env:HTTPS_PROXY="http://..."` — and the resulting env var was named
+  // `$env:HTTPS_PROXY` with a quoted value, so claude never saw any proxy.
+  it('strips PowerShell $env: prefix and outer double quotes (the real-world paste)', async () => {
+    const { parseEnvInput } = await importTerminalDefaults();
+    expect(
+      parseEnvInput('$env:HTTPS_PROXY="http://srZNTTCu:fKapAXdD@172.120.137.143:63028"'),
+    ).toEqual({ HTTPS_PROXY: 'http://srZNTTCu:fKapAXdD@172.120.137.143:63028' });
+  });
+
+  it('strips bash/zsh `export` prefix and single quotes', async () => {
+    const { parseEnvInput } = await importTerminalDefaults();
+    expect(parseEnvInput("export HTTPS_PROXY='http://user:pass@host:7890'")).toEqual({
+      HTTPS_PROXY: 'http://user:pass@host:7890',
+    });
+  });
+
+  it('strips cmd.exe `set` prefix (no quotes around value)', async () => {
+    const { parseEnvInput } = await importTerminalDefaults();
+    expect(parseEnvInput('set HTTPS_PROXY=http://host:7890')).toEqual({
+      HTTPS_PROXY: 'http://host:7890',
+    });
+  });
+
+  it('keeps inner quotes when only one side has a quote (not a balanced wrap)', async () => {
+    const { parseEnvInput } = await importTerminalDefaults();
+    // A literal `"something` is unusual but must not be silently chopped.
+    expect(parseEnvInput('A="half-open')).toEqual({ A: '"half-open' });
+  });
+
+  it('accepts a mix of shell styles in one paste', async () => {
+    const { parseEnvInput } = await importTerminalDefaults();
+    const input = [
+      '$env:HTTPS_PROXY="http://a:1"',
+      "export HTTP_PROXY='http://b:2'",
+      'NO_PROXY=localhost',
+    ].join('\n');
+    expect(parseEnvInput(input)).toEqual({
+      HTTPS_PROXY: 'http://a:1',
+      HTTP_PROXY: 'http://b:2',
+      NO_PROXY: 'localhost',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

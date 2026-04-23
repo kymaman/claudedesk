@@ -88,16 +88,39 @@ export function parseFlagsInput(raw: string): string[] {
     .filter(Boolean);
 }
 
-/** Parse env textarea — "KEY=VALUE" per line. */
+/** Parse env textarea — "KEY=VALUE" per line.
+ *  Accepts common shell-paste prefixes/quoting so a user can copy a line
+ *  from their PowerShell/bash profile and have it Just Work:
+ *    $env:FOO="bar"   (PowerShell)
+ *    export FOO="bar" (bash/zsh)
+ *    set FOO=bar      (cmd.exe)
+ *  Matching outer quotes (both " and ') are stripped from the value.
+ */
 export function parseEnvInput(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of raw.split(/\r?\n/)) {
-    const t = line.trim();
+    let t = line.trim();
     if (!t || t.startsWith('#')) continue;
+
+    // Strip shell prefixes: PowerShell ($env:), bash/zsh (export), cmd (set).
+    t = t.replace(/^\$env:/i, '');
+    t = t.replace(/^(?:export|set)\s+/i, '');
+
     const eq = t.indexOf('=');
     if (eq <= 0) continue;
     const k = t.slice(0, eq).trim();
-    const v = t.slice(eq + 1).trim();
+    let v = t.slice(eq + 1).trim();
+
+    // Strip matching outer quotes from the value. Only if both ends match —
+    // otherwise the quotes are meaningful content.
+    if (v.length >= 2) {
+      const first = v[0];
+      const last = v[v.length - 1];
+      if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+        v = v.slice(1, -1);
+      }
+    }
+
     if (k) out[k] = v;
   }
   return out;

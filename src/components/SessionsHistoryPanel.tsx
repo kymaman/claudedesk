@@ -10,7 +10,16 @@
  *  - "+ New folder" creates a custom folder
  */
 
-import { createSignal, onMount, For, Show, createMemo, createResource } from 'solid-js';
+import {
+  createSignal,
+  onMount,
+  onCleanup,
+  createEffect,
+  For,
+  Show,
+  createMemo,
+  createResource,
+} from 'solid-js';
 import './SessionsHistoryPanel.css';
 import { store } from '../store/store';
 import {
@@ -220,7 +229,21 @@ export function SessionsHistoryPanel(props: Props) {
                 setActiveProjectPath(null);
               }}
               count={sessions().length}
-              highlight={false}
+              highlight={draggedFolderTarget() === '__all__'}
+              onDragEnter={() => setDraggedFolderTarget('__all__')}
+              onDragLeave={() => {
+                if (draggedFolderTarget() === '__all__') setDraggedFolderTarget(null);
+              }}
+              onDrop={(sessionId) => {
+                setDraggedFolderTarget(null);
+                // Pull the session out of every folder it currently belongs to —
+                // dragging "back to All sessions" is the undo for a mis-drop.
+                const target = sessions().find((s) => s.sessionId === sessionId);
+                if (!target) return;
+                for (const fid of target.folderIds) {
+                  void removeSessionFromFolderAction(sessionId, fid);
+                }
+              }}
             />
 
             <Show when={folders().length > 0}>
@@ -374,11 +397,31 @@ function FolderRow(props: {
   active: boolean;
   highlight: boolean;
   onClick: () => void;
+  onDrop?: (sessionId: string) => void;
+  onDragEnter?: () => void;
+  onDragLeave?: () => void;
 }) {
+  function handleDragOver(e: DragEvent) {
+    if (!props.onDrop) return;
+    if (e.dataTransfer?.types.includes(DRAG_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    }
+  }
+  function handleDrop(e: DragEvent) {
+    if (!props.onDrop) return;
+    e.preventDefault();
+    const sessionId = e.dataTransfer?.getData(DRAG_MIME);
+    if (sessionId) props.onDrop(sessionId);
+  }
   return (
     <button
       class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
       onClick={() => props.onClick()}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onDragEnter={() => props.onDragEnter?.()}
+      onDragLeave={() => props.onDragLeave?.()}
     >
       <span class="folder-row__label">{props.label}</span>
       <Show when={typeof props.count === 'number'}>
@@ -405,6 +448,33 @@ function FolderRowCustom(props: {
   const [draft, setDraft] = createSignal('');
   const [menuOpen, setMenuOpen] = createSignal(false);
   let inputRef: HTMLInputElement | undefined;
+
+  // Close the right-click menu when the user clicks anywhere outside it.
+  // The listener is attached only while the menu is open so we don't pay for
+  // it on every row.
+  createEffect(() => {
+    if (!menuOpen()) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('.folder-row__menu')) return;
+      if (t?.closest('.folder-row') && t.closest('.folder-row') === refEl) return;
+      setMenuOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    const t = setTimeout(() => {
+      document.addEventListener('mousedown', onDown);
+      document.addEventListener('keydown', onEsc);
+    }, 0);
+    onCleanup(() => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onEsc);
+    });
+  });
+
+  let refEl: HTMLButtonElement | undefined;
 
   function handleDragOver(e: DragEvent) {
     if (e.dataTransfer?.types.includes(DRAG_MIME)) {
@@ -458,6 +528,7 @@ function FolderRowCustom(props: {
 
   return (
     <button
+      ref={refEl}
       class={`folder-row${props.active ? ' folder-row--active' : ''}${props.highlight ? ' folder-row--drop' : ''}`}
       onClick={(e) => {
         if (editing() || menuOpen()) {
@@ -551,6 +622,33 @@ function SessionRow(props: {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const agents = createMemo(() => claudeAgents());
 
+  let inputRef: HTMLInputElement | undefined;
+  let rowRef: HTMLDivElement | undefined;
+
+  // Close the right-click menu when the user clicks anywhere outside — the
+  // listener is only attached while the menu is open.
+  createEffect(() => {
+    if (!menuOpen()) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('.session-item__menu')) return;
+      if (rowRef && t && rowRef.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    const tm = setTimeout(() => {
+      document.addEventListener('mousedown', onDown);
+      document.addEventListener('keydown', onEsc);
+    }, 0);
+    onCleanup(() => {
+      clearTimeout(tm);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onEsc);
+    });
+  });
+
   // Load persisted launch settings for this session (defaults to opus-4.7 + no flags)
   const [settings, setSettings] = createSignal<LaunchSettings>({
     agentId: 'claude-opus-4-7',
@@ -561,8 +659,6 @@ function SessionRow(props: {
     const saved = await loadLaunchSettings(props.session.sessionId);
     if (saved) setSettings(saved);
   });
-
-  let inputRef: HTMLInputElement | undefined;
 
   function startEdit() {
     setDraft(props.session.title);
@@ -673,6 +769,7 @@ function SessionRow(props: {
 
   return (
     <div
+      ref={rowRef}
       class={`session-item${editing() ? ' session-item--editing' : ''}`}
       draggable={!editing()}
       onDragStart={handleDragStart}

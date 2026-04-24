@@ -133,7 +133,9 @@ test('Chats tab zooms history so chats grid fills window', async () => {
 
 test('Settings gear in TopSwitcher opens the Settings view (terminal defaults)', async () => {
   await window.locator('.ts-nav', { hasText: 'History' }).click();
-  await window.locator('.ts-settings').click();
+  // `.ts-settings:not(.ts-ask)` — the Ask toggle also uses .ts-settings, so
+  // narrow to the standalone Settings gear.
+  await window.locator('.ts-settings:not(.ts-ask)').click();
   // The gear now routes to our Settings view, where terminal defaults live
   await expect(window.locator('.agents-view')).toBeVisible();
   await expect(window.locator('.agents-section--accent').first()).toBeVisible();
@@ -247,13 +249,18 @@ test('NewSessionBar expands into inline form and launches a fresh chat', async (
   await expect(window.locator('.new-session-bar__trigger')).toBeVisible();
 });
 
-test('Session row shows JSONL file path on the item', async () => {
+test('Session row shows project name and meta row', async () => {
+  // Layout redesigned: no more standalone JSONL filepath row. The meta line
+  // at the bottom of each card carries a compact project pill (basename)
+  // plus any folder tags. Previously this test asserted on the removed
+  // .session-item__filepath row.
   await window.locator('.ts-nav', { hasText: 'History' }).click();
   await window.waitForTimeout(300);
   const first = window.locator('.session-item').first();
   const has = (await first.count()) > 0;
   test.skip(!has, 'No sessions available');
-  await expect(first.locator('.session-item__filepath')).toBeVisible();
+  await expect(first.locator('.session-item__meta')).toBeVisible();
+  await expect(first.locator('.session-item__project')).toBeVisible();
 });
 
 test('Right-click session row opens delete menu with both delete options', async () => {

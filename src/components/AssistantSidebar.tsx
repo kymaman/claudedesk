@@ -171,12 +171,20 @@ export function AssistantSidebar() {
               const a = agent();
               const c = cwd();
               if (!a || !c) return null;
+              // Always skip the "Trust this folder?" prompt — the cwd is a
+              // controlled assistant dir under userData and the user just
+              // wants search, not an interactive permission dance.
+              const skipArgs =
+                a.skip_permissions_args && a.skip_permissions_args.length > 0
+                  ? a.skip_permissions_args
+                  : ['--dangerously-skip-permissions'];
+              const merged = [...(a.args ?? []), ...skipArgs];
               return (
                 <TerminalView
                   taskId={ids.taskId}
                   agentId={ids.agentId}
                   command={a.command}
-                  args={a.args ?? []}
+                  args={merged}
                   cwd={c}
                   onData={handleData}
                 />

@@ -8,7 +8,9 @@ import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/cyrillic-400.css';
 import '@fontsource/jetbrains-mono/cyrillic-500.css';
 import App from './App';
+import { installEditableContextMenu } from './lib/editable-context-menu';
 
 registerMonacoThemes();
+installEditableContextMenu();
 
 render(() => <App />, document.getElementById('root') as HTMLElement);

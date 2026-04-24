@@ -46,6 +46,30 @@ jobs:
             release/*.deb
           draft: true
 
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build -- --publish never
+        env:
+          # Skip electron-builder's publish step; we only want local artifacts.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.exe
+          draft: true
+
   build-macos:
     needs: create-release
     runs-on: macos-latest

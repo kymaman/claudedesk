@@ -1,0 +1,206 @@
+.projects-panel {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.projects-rail {
+  width: 220px;
+  min-width: 180px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+  display: flex;
+  flex-direction: column;
+  padding: 6px 4px;
+  gap: 2px;
+}
+
+.projects-rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.projects-rail__title {
+  font-weight: 600;
+}
+
+.projects-rail__btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.projects-rail__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+}
+
+.projects-rail__create {
+  padding: 2px 4px;
+}
+
+.projects-rail__create-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 4px;
+}
+
+.projects-rail__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.projects-rail__row:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.projects-rail__row--active {
+  background: color-mix(in srgb, var(--accent, var(--fg)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent, var(--fg)) 40%, var(--border));
+}
+
+.projects-rail__row--drop {
+  background: color-mix(in srgb, var(--accent, var(--fg)) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent, var(--fg)) 60%, var(--border));
+  border-style: dashed;
+}
+
+.projects-rail__row-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.projects-rail__row-count {
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+
+.projects-rail__row-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.projects-rail__row-x {
+  background: transparent;
+  border: none;
+  color: var(--fg-subtle);
+  padding: 0 4px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.projects-rail__row-x:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.projects-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.projects-main__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.projects-main__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.projects-main__count {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.projects-main__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  gap: 16px;
+  max-width: 520px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.projects-main__cta {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--accent, var(--border));
+  background: color-mix(in srgb, var(--accent, var(--fg)) 18%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.projects-main__hint {
+  padding: 20px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.projects-main__grid {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}

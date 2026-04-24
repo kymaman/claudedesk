@@ -65,6 +65,15 @@ import { askAboutCode, cancelAskAboutCode } from './ask-code.js';
 import { setMinimaxApiKey } from './ask-code-minimax.js';
 import { ensureAssistantCwd, refreshAssistantIndex } from './assistant.js';
 import {
+  listProjects as listProjectsWs,
+  createProject as createProjectWs,
+  renameProject as renameProjectWs,
+  deleteProject as deleteProjectWs,
+  assignSessionToProject,
+  listSessionsInProject,
+  listSessionProjectMap,
+} from './workspaces.js';
+import {
   listSessions,
   getSessionPreview,
   renameSession,
@@ -846,6 +855,39 @@ export function registerAllHandlers(win: BrowserWindow): void {
   // --- Assistant sidebar ---
   ipcMain.handle(IPC.EnsureAssistantCwd, () => ensureAssistantCwd());
   ipcMain.handle(IPC.RefreshAssistantIndex, () => refreshAssistantIndex());
+
+  // --- Projects (chat workspaces) ---
+  ipcMain.handle(IPC.ListProjects, () => listProjectsWs());
+  ipcMain.handle(IPC.CreateProject, (_e, args) => {
+    assertString(args.name, 'name');
+    const color = typeof args.color === 'string' ? args.color : undefined;
+    return createProjectWs({ name: args.name, ...(color ? { color } : {}) });
+  });
+  ipcMain.handle(IPC.RenameProject, (_e, args) => {
+    assertString(args.id, 'id');
+    assertString(args.name, 'name');
+    renameProjectWs({ id: args.id, name: args.name });
+  });
+  ipcMain.handle(IPC.DeleteProject, (_e, args) => {
+    assertString(args.id, 'id');
+    deleteProjectWs({ id: args.id });
+  });
+  ipcMain.handle(IPC.AssignSessionToProject, (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    const projectId: string | null =
+      args.projectId === null || args.projectId === undefined
+        ? null
+        : (() => {
+            assertString(args.projectId, 'projectId');
+            return args.projectId as string;
+          })();
+    assignSessionToProject({ sessionId: args.sessionId, projectId });
+  });
+  ipcMain.handle(IPC.ListSessionsInProject, (_e, args) => {
+    assertString(args.projectId, 'projectId');
+    return listSessionsInProject(args.projectId);
+  });
+  ipcMain.handle(IPC.ListSessionProjectMap, () => listSessionProjectMap());
 
   // --- Sessions history ---
   ipcMain.handle(IPC.ListClaudeSessions, (_e, args) => {

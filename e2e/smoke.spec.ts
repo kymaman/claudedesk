@@ -62,13 +62,14 @@ test('window loads and is titled', async () => {
   expect(await window.isVisible('body')).toBe(true);
 });
 
-test('TopSwitcher renders four nav buttons: History, Chats, Branches, Agents', async () => {
+test('TopSwitcher renders five nav buttons: History, Chats, Projects, Branches, Agents', async () => {
   const nav = window.locator('.top-switcher__nav .ts-nav');
-  await expect(nav).toHaveCount(4);
+  await expect(nav).toHaveCount(5);
   await expect(nav.nth(0)).toHaveText(/History/);
   await expect(nav.nth(1)).toHaveText(/Chats/);
-  await expect(nav.nth(2)).toHaveText(/Branches/);
-  await expect(nav.nth(3)).toHaveText(/Agents/);
+  await expect(nav.nth(2)).toHaveText(/Projects/);
+  await expect(nav.nth(3)).toHaveText(/Branches/);
+  await expect(nav.nth(4)).toHaveText(/Agents/);
 });
 
 test('History is the default view and shows folders + session list + preview', async () => {

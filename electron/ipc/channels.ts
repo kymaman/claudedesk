@@ -155,4 +155,13 @@ export enum IPC {
   // Assistant sidebar
   EnsureAssistantCwd = 'ensure_assistant_cwd',
   RefreshAssistantIndex = 'refresh_assistant_index',
+
+  // Projects ("workspaces" in code)
+  ListProjects = 'list_projects_ws',
+  CreateProject = 'create_project_ws',
+  RenameProject = 'rename_project_ws',
+  DeleteProject = 'delete_project_ws',
+  AssignSessionToProject = 'assign_session_to_project',
+  ListSessionsInProject = 'list_sessions_in_project',
+  ListSessionProjectMap = 'list_session_project_map',
 }

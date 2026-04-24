@@ -11,6 +11,7 @@ import { TopSwitcher } from './components/TopSwitcher';
 import { SessionsHistoryPanel } from './components/SessionsHistoryPanel';
 import { AgentsView } from './components/AgentsView';
 import { AssistantSidebar } from './components/AssistantSidebar';
+import { ProjectsPanel } from './components/ProjectsPanel';
 import { assistantOpen } from './store/assistant';
 import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
@@ -772,6 +773,9 @@ function App() {
             >
               <SessionsHistoryPanel />
             </div>
+            <Show when={mainView() === 'projects'}>
+              <ProjectsPanel />
+            </Show>
             <Show when={mainView() === 'agents'}>
               <AgentsView />
             </Show>

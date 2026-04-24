@@ -133,6 +133,17 @@ const ALLOWED_CHANNELS = new Set([
   'pin_folder',
   // Delete session file
   'delete_session_file',
+  // Assistant sidebar
+  'ensure_assistant_cwd',
+  'refresh_assistant_index',
+  // Projects (chat workspaces)
+  'list_projects_ws',
+  'create_project_ws',
+  'rename_project_ws',
+  'delete_project_ws',
+  'assign_session_to_project',
+  'list_sessions_in_project',
+  'list_session_project_map',
 ]);
 
 function isAllowedChannel(channel) {

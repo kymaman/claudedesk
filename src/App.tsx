@@ -10,6 +10,8 @@ import { TilingLayout } from './components/TilingLayout';
 import { TopSwitcher } from './components/TopSwitcher';
 import { SessionsHistoryPanel } from './components/SessionsHistoryPanel';
 import { AgentsView } from './components/AgentsView';
+import { AssistantSidebar } from './components/AssistantSidebar';
+import { assistantOpen } from './store/assistant';
 import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
 import { NewTaskDialog } from './components/NewTaskDialog';
@@ -747,7 +749,15 @@ function App() {
         >
           <TopSwitcher />
           <NewSessionBar />
-          <div style={{ flex: '1', display: 'flex', overflow: 'hidden', 'min-height': '0' }}>
+          <div
+            style={{
+              flex: '1',
+              display: 'flex',
+              'flex-direction': 'row',
+              overflow: 'hidden',
+              'min-height': '0',
+            }}
+          >
             {/* History + Chats share the same SessionsHistoryPanel tree so
                 that xterm tiles don't remount (and flash) when the user
                 flips between History and Chats tabs. The panel internally
@@ -800,6 +810,9 @@ function App() {
                 </button>
               </Show>
               <TilingLayout />
+            </Show>
+            <Show when={assistantOpen()}>
+              <AssistantSidebar />
             </Show>
           </div>
           <NewTaskDialog

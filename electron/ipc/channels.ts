@@ -151,4 +151,8 @@ export enum IPC {
 
   // Hard delete a session file on disk (irreversible)
   DeleteSessionFile = 'delete_session_file',
+
+  // Assistant sidebar
+  EnsureAssistantCwd = 'ensure_assistant_cwd',
+  RefreshAssistantIndex = 'refresh_assistant_index',
 }

@@ -63,6 +63,7 @@ import { loadKeybindings, saveKeybindings } from './keybindings.js';
 import { spawn } from 'child_process';
 import { askAboutCode, cancelAskAboutCode } from './ask-code.js';
 import { setMinimaxApiKey } from './ask-code-minimax.js';
+import { ensureAssistantCwd, refreshAssistantIndex } from './assistant.js';
 import {
   listSessions,
   getSessionPreview,
@@ -841,6 +842,10 @@ export function registerAllHandlers(win: BrowserWindow): void {
       port: remoteServer.port,
     };
   });
+
+  // --- Assistant sidebar ---
+  ipcMain.handle(IPC.EnsureAssistantCwd, () => ensureAssistantCwd());
+  ipcMain.handle(IPC.RefreshAssistantIndex, () => refreshAssistantIndex());
 
   // --- Sessions history ---
   ipcMain.handle(IPC.ListClaudeSessions, (_e, args) => {

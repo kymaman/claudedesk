@@ -1,0 +1,138 @@
+.assistant-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  min-width: 300px;
+  max-width: 520px;
+  height: 100%;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.assistant-sidebar__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.assistant-sidebar__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.assistant-sidebar__meta {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-left: 4px;
+  flex: 1;
+}
+
+.assistant-sidebar__btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.assistant-sidebar__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+}
+
+.assistant-sidebar__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.assistant-sidebar__btn--close {
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.assistant-sidebar__terminal {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.assistant-sidebar__terminal > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.assistant-sidebar__boot {
+  padding: 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.assistant-sidebar__matches {
+  border-top: 1px solid var(--border);
+  padding: 6px 8px 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.assistant-sidebar__matches-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+
+.assistant-sidebar__chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.assistant-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.assistant-chip:hover {
+  background: color-mix(in srgb, var(--accent, var(--fg)) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent, var(--fg)) 40%, var(--border));
+}
+
+.assistant-chip__title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assistant-chip__date {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}

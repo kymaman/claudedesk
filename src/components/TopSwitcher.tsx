@@ -10,6 +10,7 @@ import { For, Show } from 'solid-js';
 import { store, setActiveTask, toggleNewTaskDialog } from '../store/store';
 import { mainView, setMainView, type MainView } from '../store/mainView';
 import { openChats, activeChatId, setActiveChatId, closeChat } from '../store/chats';
+import { assistantOpen, toggleAssistant } from '../store/assistant';
 import './TopSwitcher.css';
 
 interface NavItem {
@@ -108,6 +109,16 @@ export function TopSwitcher() {
           <span class="ts-empty">No open chats — click ▶ on a session to start one</span>
         </Show>
       </div>
+
+      <button
+        class={`ts-settings ts-ask${assistantOpen() ? ' ts-ask--on' : ''}`}
+        onClick={() => toggleAssistant()}
+        title="Ask — search across all your chats"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M11.5 7.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Zm-.69 3.37 2.41 2.41a.75.75 0 1 1-1.06 1.06l-2.41-2.41a5 5 0 1 1 1.06-1.06Z" />
+        </svg>
+      </button>
 
       <button
         class="ts-settings"

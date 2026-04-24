@@ -102,7 +102,14 @@ export function SessionsHistoryPanel(props: Props) {
     const name = newFolderName().trim();
     setCreatingFolder(false);
     setNewFolderName('');
-    if (name) await createFolderAction(name);
+    if (!name) return;
+    const folder = await createFolderAction(name);
+    // Auto-select so the new row is visible even when "Hide empty" is on —
+    // the filter special-cases the active folder id.
+    if (folder) {
+      setActiveFolderId(folder.id);
+      setActiveProjectPath(null);
+    }
   }
 
   function cancelCreateFolder() {
@@ -222,8 +229,12 @@ export function SessionsHistoryPanel(props: Props) {
             <For
               each={folders().filter((f) => {
                 if (!hideEmptyFolders()) return true;
+                // Always keep pinned folders and the currently-active one visible —
+                // otherwise a freshly-created (empty) folder would vanish behind
+                // the filter the moment it's saved.
+                if (f.pinned || activeFolderId() === f.id) return true;
                 const count = sessions().filter((s) => s.folderIds.includes(f.id)).length;
-                return count > 0 || f.pinned;
+                return count > 0;
               })}
             >
               {(folder) => (

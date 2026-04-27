@@ -55,6 +55,15 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* Highlighted while another tile is being dragged over this one — gives the
+   user a clear "this is where the drop will land" cue. Dashed + faint
+   accent-tinted background to distinguish from the solid "active" ring. */
+.chat-tile--drop-target {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+
 .chat-tile__head {
   display: flex;
   align-items: center;
@@ -64,6 +73,12 @@
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   min-height: 26px;
+  /* draggable: the header is the drag handle for tile reordering */
+  cursor: grab;
+}
+
+.chat-tile__head:active {
+  cursor: grabbing;
 }
 
 .chat-tile__title {

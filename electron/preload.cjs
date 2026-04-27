@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame, clipboard } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 // Allowlist of valid IPC channels.
 // IMPORTANT: This list MUST stay in sync with the IPC enum in electron/ipc/channels.ts.
@@ -174,8 +174,13 @@ contextBridge.exposeInMainWorld('electron', {
   /**
    * Synchronous clipboard read — needed by the xterm paste path so that
    * pressing Enter immediately after Ctrl+V doesn't race the async
-   * navigator.clipboard.readText() permission flow. Electron's `clipboard`
-   * module is synchronous in the renderer.
+   * navigator.clipboard.readText() permission flow. The `clipboard`
+   * module isn't available in a sandboxed preload (Electron 40 strips it),
+   * so we go through a sendSync IPC to the main process. sendSync blocks
+   * the renderer thread but returns immediately when the handler does.
    */
-  clipboardReadText: () => clipboard.readText(),
+  clipboardReadText: () => ipcRenderer.sendSync('clipboard_read_text_sync'),
+  /** Test-only / dictation-seed counterpart. */
+  clipboardWriteText: (text) =>
+    ipcRenderer.sendSync('clipboard_write_text_sync', String(text ?? '')),
 });

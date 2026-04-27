@@ -649,6 +649,28 @@ export function registerAllHandlers(win: BrowserWindow): void {
   });
 
   // --- Clipboard ---
+  // Synchronous text read/write via sendSync so the xterm Ctrl+V handler
+  // can enqueue the paste body in the same tick as the keystroke (any
+  // async path lets a follow-up Enter race ahead of the paste content).
+  // These are NOT routed through the channel-allowlist preload guard
+  // because they're sendSync, not invoke. The handlers reject any args
+  // shape they don't expect.
+  ipcMain.on('clipboard_read_text_sync', (e) => {
+    try {
+      e.returnValue = clipboard.readText();
+    } catch {
+      e.returnValue = '';
+    }
+  });
+  ipcMain.on('clipboard_write_text_sync', (e, text) => {
+    try {
+      clipboard.writeText(typeof text === 'string' ? text : '');
+      e.returnValue = true;
+    } catch {
+      e.returnValue = false;
+    }
+  });
+
   const clipboardImagePath = path.join(os.tmpdir(), 'parallel-code-clipboard.png');
   ipcMain.handle(IPC.SaveClipboardImage, async () => {
     try {

@@ -207,6 +207,49 @@ test('Paste context menu opens when right-clicking a text input', async () => {
   await expect(win.locator('.editable-context-menu')).toBeHidden({ timeout: 2_000 });
 });
 
+test('Chat tile shows a drop-target indicator on dragover from another tile', async () => {
+  // Open the Ask sidebar so we have a guaranteed terminal-bearing tile.
+  // The smoke test "wide chat tile" gives us the regular Chats grid coverage,
+  // but Ask reliably runs in CI without external dependencies.
+  // For the drop-target visual, we don't even need a second tile — we can
+  // dispatch a synthetic dragover with the right MIME on a single .chat-tile
+  // and assert the class flips.
+  await win.locator('.ts-nav', { hasText: 'History' }).click();
+  await win.waitForTimeout(300);
+  const firstRow = win.locator('.session-item').first();
+  const has = (await firstRow.count()) > 0;
+  test.skip(!has, 'No sessions to open a chat from');
+
+  await firstRow.locator('.session-item__resume').click();
+  const tile = win.locator('.chat-tile').first();
+  await expect(tile).toBeVisible({ timeout: 5_000 });
+
+  // Synthesize a dragover with our drag MIME so the dragOver handler fires.
+  const flipped = await tile.evaluate((el) => {
+    const dt = new DataTransfer();
+    dt.setData('application/x-claudedesk-chat-id', 'fake-source');
+    el.dispatchEvent(
+      new DragEvent('dragover', {
+        dataTransfer: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    return el.classList.contains('chat-tile--drop-target');
+  });
+  expect(flipped).toBe(true);
+
+  // dragleave clears it.
+  const cleared = await tile.evaluate((el) => {
+    el.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
+    return el.classList.contains('chat-tile--drop-target');
+  });
+  expect(cleared).toBe(false);
+
+  // Cleanup: close the chat tile.
+  await tile.locator('.chat-tile__close').click();
+});
+
 test('Paste image — context menu shows the option, IPC saves an image to disk', async () => {
   // Right-click the search input to open the menu.
   await win.locator('.ts-nav', { hasText: 'History' }).click();

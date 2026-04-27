@@ -5,7 +5,7 @@
  * TerminalView. Tile selection ring shows the active chat.
  */
 
-import { For, Show, createMemo, onMount, onCleanup } from 'solid-js';
+import { For, Show, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
 import {
   activeChatId,
   setActiveChatId,
@@ -17,7 +17,7 @@ import {
   type Chat,
 } from '../store/chats';
 import { TerminalView } from './TerminalView';
-import { DragMime, acceptDrag, handleDrop, setDragPayload } from '../lib/drag-mime';
+import { DragMime, acceptDrag, dragHasMime, handleDrop, setDragPayload } from '../lib/drag-mime';
 import './ChatsGrid.css';
 
 function columnsForCount(n: number): number {
@@ -60,6 +60,9 @@ export function ChatsGrid(props: { chats?: () => Chat[] } = {}) {
 
 function ChatTile(props: { chat: Chat }) {
   const isActive = () => activeChatId() === props.chat.id;
+  // True while another tile is being dragged over this one — drives the
+  // drop-target ring so the user can see exactly where the drop will land.
+  const [isDropTarget, setIsDropTarget] = createSignal(false);
 
   function onRename(e: MouseEvent) {
     e.stopPropagation();
@@ -72,12 +75,21 @@ function ChatTile(props: { chat: Chat }) {
   // whole tile because that would interfere with text selection inside
   // the xterm body.
   const onHeadDragStart = (e: DragEvent) => setDragPayload(e, DragMime.ChatId, props.chat.id);
-  const onTileDragOver = acceptDrag(DragMime.ChatId);
+  const acceptHandler = acceptDrag(DragMime.ChatId);
+  function onTileDragOver(e: DragEvent) {
+    if (!dragHasMime(e, DragMime.ChatId)) return;
+    acceptHandler(e);
+    setIsDropTarget(true);
+  }
+  function onTileDragLeave() {
+    setIsDropTarget(false);
+  }
   // The drop handler closes over props.chat.id — Solid's lint flags
   // factory-built handlers as "untracked", but DOM event listeners read
   // the current props via the closure on each event so this is fine.
   // eslint-disable-next-line solid/reactivity
   const onTileDrop = handleDrop(DragMime.ChatId, (fromId) => {
+    setIsDropTarget(false);
     if (fromId === props.chat.id) return;
     const targetIndex = openChats().findIndex((c) => c.id === props.chat.id);
     if (targetIndex >= 0) reorderChat(fromId, targetIndex);
@@ -100,9 +112,12 @@ function ChatTile(props: { chat: Chat }) {
 
   return (
     <div
-      class={`chat-tile${isActive() ? ' chat-tile--active' : ''}`}
+      class={`chat-tile${isActive() ? ' chat-tile--active' : ''}${
+        isDropTarget() ? ' chat-tile--drop-target' : ''
+      }`}
       onClick={() => setActiveChatId(props.chat.id)}
       onDragOver={onTileDragOver}
+      onDragLeave={onTileDragLeave}
       onDrop={onTileDrop}
     >
       <div

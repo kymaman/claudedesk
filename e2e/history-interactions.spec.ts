@@ -206,3 +206,51 @@ test('Paste context menu opens when right-clicking a text input', async () => {
   await win.keyboard.press('Escape');
   await expect(win.locator('.editable-context-menu')).toBeHidden({ timeout: 2_000 });
 });
+
+test('Paste image — context menu shows the option, IPC saves an image to disk', async () => {
+  // Right-click the search input to open the menu.
+  await win.locator('.ts-nav', { hasText: 'History' }).click();
+  await win.locator('.sessions-panel__search').click({ button: 'right' });
+  const menu = win.locator('.editable-context-menu');
+  await expect(menu).toBeVisible({ timeout: 2_000 });
+
+  // The "Paste image" item is part of the menu (initially disabled until the
+  // async clipboard probe resolves — its presence is the contract this test
+  // pins down; the enable/disable race is platform-dependent).
+  const item = menu.locator('button[data-paste-image]');
+  await expect(item).toBeVisible();
+  await expect(item).toHaveText('Paste image');
+  await win.keyboard.press('Escape');
+
+  // Independently: hand a tiny PNG to electron.clipboard via the
+  // `nativeImage` API, then call SaveClipboardImage IPC and confirm a path
+  // comes back. Skips on platforms where clipboard write requires focus
+  // and we couldn't acquire it (Linux headless), but Windows/macOS work.
+  const ok = await win.evaluate(async () => {
+    // Use a tiny in-memory PNG to seed the clipboard via document.execCommand
+    // 'copy' on a synthetic <img>. Falls back to false if not feasible.
+    try {
+      const dataUrl =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9ZQnHwAAAABJRU5ErkJggg==';
+      const blob = await fetch(dataUrl).then((r) => r.blob());
+      const item = new ClipboardItem({ 'image/png': blob });
+      await navigator.clipboard.write([item]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  test.skip(!ok, 'this OS does not let us seed the clipboard from JS');
+
+  const filePath = await win.evaluate(async () => {
+    const bridge = (
+      window as unknown as {
+        electron?: {
+          ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> };
+        };
+      }
+    ).electron;
+    return (await bridge?.ipcRenderer.invoke('save_clipboard_image')) as string | null;
+  });
+  expect(typeof filePath === 'string' && filePath.length > 0).toBe(true);
+});

@@ -2,14 +2,21 @@
  * editable-context-menu.ts
  * Electron's renderer does not get a native Copy/Paste menu out of the box,
  * so pasting with the right mouse button into an <input> / <textarea> /
- * contenteditable fails silently — the user has reported exactly that.
- * This module installs a single document-level "contextmenu" listener that
- * opens a small in-renderer menu over any editable target with Cut, Copy,
- * Paste, and Select all, backed by the Clipboard API.
+ * contenteditable fails silently — the user reported exactly that. This
+ * module installs a single document-level "contextmenu" listener that
+ * opens a small in-renderer menu over any editable target (xterm's hidden
+ * helper-textarea is also included) with Cut, Copy, Paste, "Paste image",
+ * and Select all. Text paste is backed by the Clipboard API; image paste
+ * reads the image bytes off the clipboard, hands them to the main process
+ * to save under userData/clipboard-pastes, and types the resulting absolute
+ * path into the focused element — claude CLI happily reads images by path.
  *
  * The menu is a plain absolutely-positioned <div> — no framework, no portals,
  * so it works regardless of which Solid tree happens to be mounted.
  */
+
+import { invoke } from './ipc';
+import { IPC } from '../../electron/ipc/channels';
 
 interface State {
   el: HTMLDivElement | null;
@@ -39,7 +46,21 @@ function close() {
   }
 }
 
-function openAt(x: number, y: number, target: HTMLElement) {
+/** Quick async check: does the system clipboard hold an image right now?
+ *  Uses the Web Clipboard API (no IPC) so the menu can decide whether to
+ *  enable the "Paste image" item without waiting on the main process.
+ *  Falls back to false on permission errors. */
+async function clipboardHasImage(): Promise<boolean> {
+  try {
+    if (!navigator.clipboard?.read) return false;
+    const items = await navigator.clipboard.read();
+    return items.some((it) => it.types.some((t) => t.startsWith('image/')));
+  } catch {
+    return false;
+  }
+}
+
+function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) {
   close();
   const menu = document.createElement('div');
   menu.className = 'editable-context-menu';
@@ -94,6 +115,22 @@ function openAt(x: number, y: number, target: HTMLElement) {
       },
     },
     {
+      label: 'Paste image',
+      enabled: imageReady,
+      action: async () => {
+        try {
+          // Existing IPC reads electron.clipboard.readImage() in the main
+          // process and writes it to a temp PNG, returning the path. We
+          // type that path into the focused element — claude CLI accepts
+          // images by path.
+          const filePath = await invoke<string | null>(IPC.SaveClipboardImage);
+          if (filePath) replaceSelection(target, filePath);
+        } catch (err) {
+          console.warn('[paste-image] save failed:', err);
+        }
+      },
+    },
+    {
       label: 'Select all',
       enabled: true,
       action: () => {
@@ -115,6 +152,7 @@ function openAt(x: number, y: number, target: HTMLElement) {
     btn.textContent = item.label;
     btn.type = 'button';
     btn.disabled = !item.enabled;
+    if (item.label === 'Paste image') btn.setAttribute('data-paste-image', '1');
     Object.assign(btn.style, {
       display: 'block',
       width: '100%',
@@ -185,7 +223,20 @@ export function installEditableContextMenu(): void {
     const target = e.target;
     if (!isEditable(target)) return;
     e.preventDefault();
-    openAt(e.clientX, e.clientY, target);
+    // Open immediately with imageReady=false so the menu doesn't lag, then
+    // upgrade the "Paste image" item if an image turns out to be on the
+    // clipboard. Most users right-click + click within ~150ms; the upgrade
+    // race is fine for a UX hint.
+    openAt(e.clientX, e.clientY, target, false);
+    void clipboardHasImage().then((has) => {
+      if (!has || !state.el) return;
+      const item = state.el.querySelector<HTMLButtonElement>('button[data-paste-image]');
+      if (item) {
+        item.disabled = false;
+        item.style.opacity = '1';
+        item.style.cursor = 'pointer';
+      }
+    });
   });
   document.addEventListener('mousedown', (e) => {
     if (!state.el) return;

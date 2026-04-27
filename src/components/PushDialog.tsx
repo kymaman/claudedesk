@@ -1,7 +1,7 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { pushTask } from '../store/store';
 import { Channel } from '../lib/ipc';
-import { Dialog } from './Dialog';
+import { DialogShell, DialogFooter, DialogCancelButton, DialogPrimaryButton } from './DialogShell';
 import { theme, bannerStyle } from '../lib/theme';
 import type { Task } from '../store/types';
 
@@ -69,22 +69,31 @@ export function PushDialog(props: PushDialogProps) {
   }
 
   return (
-    <Dialog
+    <DialogShell
       open={props.open}
-      onClose={() => (pushing() ? props.onClose() : props.onDone(false))}
+      title="Push to Remote"
       width="480px"
+      onClose={() => (pushing() ? props.onClose() : props.onDone(false))}
+      footer={
+        <DialogFooter>
+          <DialogCancelButton
+            onClick={() => {
+              if (pushing()) {
+                props.onClose();
+              } else {
+                props.onDone(false);
+                setPushError('');
+                setOutput('');
+              }
+            }}
+            label={pushing() ? 'Close' : 'Cancel'}
+          />
+          <Show when={!pushing()}>
+            <DialogPrimaryButton onClick={startPush} label="Push" />
+          </Show>
+        </DialogFooter>
+      }
     >
-      <h2
-        style={{
-          margin: '0',
-          'font-size': '17px',
-          color: theme.fg,
-          'font-weight': '600',
-        }}
-      >
-        Push to Remote
-      </h2>
-
       <div style={{ 'font-size': '14px', color: theme.fgMuted, 'line-height': '1.5' }}>
         <Show
           when={pushing() || output()}
@@ -127,59 +136,6 @@ export function PushDialog(props: PushDialogProps) {
           </div>
         </Show>
       </div>
-
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          'justify-content': 'flex-end',
-          'padding-top': '4px',
-        }}
-      >
-        <button
-          type="button"
-          class="btn-secondary"
-          onClick={() => {
-            if (pushing()) {
-              props.onClose();
-            } else {
-              props.onDone(false);
-              setPushError('');
-              setOutput('');
-            }
-          }}
-          style={{
-            padding: '9px 18px',
-            background: theme.bgInput,
-            border: `1px solid ${theme.border}`,
-            'border-radius': '8px',
-            color: theme.fgMuted,
-            cursor: 'pointer',
-            'font-size': '14px',
-          }}
-        >
-          {pushing() ? 'Close' : 'Cancel'}
-        </button>
-        <Show when={!pushing()}>
-          <button
-            type="button"
-            class="btn-primary"
-            onClick={startPush}
-            style={{
-              padding: '9px 20px',
-              background: theme.accent,
-              border: 'none',
-              'border-radius': '8px',
-              color: theme.accentText,
-              cursor: 'pointer',
-              'font-size': '14px',
-              'font-weight': '500',
-            }}
-          >
-            Push
-          </button>
-        </Show>
-      </div>
-    </Dialog>
+    </DialogShell>
   );
 }

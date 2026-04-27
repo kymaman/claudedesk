@@ -123,5 +123,11 @@
 .chat-tile__body {
   flex: 1;
   min-height: 0;
+  /* min-width:0 here (and on the .chat-tile parent) keeps the body from
+     being inflated by xterm's internal canvas width — without this the
+     terminal can occasionally render wider than the tile and look
+     "shifted left" until the next refit cycle, which is what the user
+     reported as "chat sometimes shrinks inside". */
+  min-width: 0;
   overflow: hidden;
 }

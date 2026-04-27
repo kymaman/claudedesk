@@ -13,7 +13,7 @@ import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { sessions, loadSessions } from './sessions-history';
-import { openChatFromSession, openChats, closeChat } from './chats';
+import { openChatFromSession, openChatsInProject } from './chats';
 import { loadLaunchSettings } from './launch-settings';
 
 export interface Project {
@@ -120,32 +120,43 @@ export function sessionIdsInProject(projectId: string): string[] {
 }
 
 /**
- * Open a project: close every currently-open chat and resume every session
- * assigned to the given project. Keeps the session list loaded fresh.
+ * Open a project. Project-scoped chats stay running across switches —
+ * we only flip the activeProjectId signal, which the UI uses to filter
+ * which open chats are visible.
+ *
+ * Sessions assigned to the project that aren't already running get resumed
+ * (and tagged with this projectId so they show in the project view). Chats
+ * already alive elsewhere are NOT touched — switching workspaces never
+ * kills work in progress.
  */
 export async function openProject(projectId: string): Promise<void> {
   setActiveProjectId(projectId);
-  // Close everything that's open right now. The workspace becomes "the only
-  // thing on screen".
-  for (const c of openChats()) closeChat(c.id);
-  // Make sure we have the current session list to resume from.
   if (sessions().length === 0) await loadSessions();
-  const ids = new Set(sessionIdsInProject(projectId));
-  if (ids.size === 0) return;
-  const items = sessions().filter((s) => ids.has(s.sessionId));
-  // Launch settings are per-session, so pull them in parallel.
+  const projectSessionIds = new Set(sessionIdsInProject(projectId));
+  if (projectSessionIds.size === 0) return;
+  // Don't double-resume — skip any session that already has an open chat
+  // tagged to this project.
+  const alreadyOpen = new Set(
+    openChatsInProject(projectId)
+      .map((c) => c.sessionId)
+      .filter((s): s is string => Boolean(s)),
+  );
+  const toOpen = sessions().filter(
+    (s) => projectSessionIds.has(s.sessionId) && !alreadyOpen.has(s.sessionId),
+  );
   await Promise.all(
-    items.map(async (s) => {
+    toOpen.map(async (s) => {
       const saved = await loadLaunchSettings(s.sessionId);
       openChatFromSession(
         s,
         saved ?? { agentId: 'claude-opus-4-7', extraFlags: [], skipPermissions: false },
+        { projectId },
       );
     }),
   );
 }
 
-/** Close the current project (chats stay open; user just leaves workspace mode). */
+/** Leave a project — flip activeProjectId back to null. Chats stay running. */
 export function leaveProject(): void {
   setActiveProjectId(null);
 }

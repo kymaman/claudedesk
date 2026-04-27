@@ -38,6 +38,8 @@ export interface Chat {
   env: Record<string, string>;
   /** Launch options the chat was started with */
   settings: ChatLaunchSettings;
+  /** Project this chat belongs to (workspace isolation). null = unassigned. */
+  projectId: string | null;
   createdAt: number;
   /** Marked true when user closes the tab — kept in the array briefly so we
    *  can animate out, then pruned. */
@@ -73,6 +75,7 @@ function resolveAgent(agentDefId: string) {
 export function openChatFromSession(
   session: SessionItem,
   settings: ChatLaunchSettings,
+  options: { projectId?: string | null } = {},
 ): Chat | null {
   const baseAgent = resolveAgent(settings.agentId);
   if (!baseAgent) {
@@ -97,6 +100,7 @@ export function openChatFromSession(
     args,
     env: {},
     settings,
+    projectId: options.projectId ?? null,
     createdAt: Date.now(),
     closed: false,
   };
@@ -111,6 +115,7 @@ export function openFreshChat(params: {
   extraFlags?: string[];
   skipPermissions?: boolean;
   title?: string;
+  projectId?: string | null;
 }): Chat | null {
   const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-7');
   if (!baseAgent) {
@@ -134,12 +139,41 @@ export function openFreshChat(params: {
       extraFlags: params.extraFlags ?? [],
       skipPermissions: params.skipPermissions ?? false,
     },
+    projectId: params.projectId ?? null,
     createdAt: Date.now(),
     closed: false,
   };
   _setChats((prev) => [...prev, chat]);
   _setActiveChatId(chat.id);
   return chat;
+}
+
+/**
+ * Move a chat to a different project (or unassign with null). Updates the
+ * in-memory chat object only; if the chat has a sessionId, the caller is
+ * responsible for also persisting via assignSessionToProject IPC so the
+ * association survives an app restart.
+ */
+export function setChatProject(chatId: string, projectId: string | null): void {
+  _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, projectId } : c)));
+}
+
+/** Reorder a chat — moves it to `targetIndex` in the openChats list. */
+export function reorderChat(chatId: string, targetIndex: number): void {
+  _setChats((prev) => {
+    const next = [...prev];
+    const from = next.findIndex((c) => c.id === chatId);
+    if (from < 0 || from === targetIndex) return prev;
+    const clamped = Math.max(0, Math.min(targetIndex, next.length - 1));
+    const [item] = next.splice(from, 1);
+    next.splice(clamped, 0, item);
+    return next;
+  });
+}
+
+/** All open chats that belong to a particular project (or null = unassigned). */
+export function openChatsInProject(projectId: string | null): Chat[] {
+  return openChats().filter((c) => (c.projectId ?? null) === projectId);
 }
 
 export function closeChat(chatId: string): void {

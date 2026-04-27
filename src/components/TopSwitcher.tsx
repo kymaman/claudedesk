@@ -9,9 +9,19 @@
 import { For, Show } from 'solid-js';
 import { store, setActiveTask, toggleNewTaskDialog } from '../store/store';
 import { mainView, setMainView, type MainView } from '../store/mainView';
-import { openChats, activeChatId, setActiveChatId, closeChat } from '../store/chats';
+import {
+  openChats,
+  openChatsInProject,
+  activeChatId,
+  setActiveChatId,
+  closeChat,
+  reorderChat,
+} from '../store/chats';
+import { activeProjectId } from '../store/chat-projects';
 import { assistantOpen, toggleAssistant } from '../store/assistant';
 import './TopSwitcher.css';
+
+const DRAG_CHAT_MIME = 'application/x-claudedesk-chat-id';
 
 interface NavItem {
   id: MainView;
@@ -55,16 +65,44 @@ export function TopSwitcher() {
       <div class="top-switcher__sep" />
 
       <div class="top-switcher__chats" title="Open chats">
-        {/* History chats — click to focus, × to close */}
-        <For each={openChats()}>
+        {/* Filter chips by current view: in Projects mode, show only the
+            active project's chats so we don't bleed unrelated workspaces.
+            In any other view, show every project-less chat. The chips are
+            draggable for reordering. */}
+        <For
+          each={
+            mainView() === 'projects'
+              ? openChatsInProject(activeProjectId())
+              : openChatsInProject(null)
+          }
+        >
           {(chat) => (
             <button
               class={`ts-chip ${activeChatId() === chat.id ? 'ts-chip--active' : ''}`}
+              draggable={true}
+              onDragStart={(e) => {
+                if (!e.dataTransfer) return;
+                e.dataTransfer.setData(DRAG_CHAT_MIME, chat.id);
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragOver={(e) => {
+                if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(e) => {
+                if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
+                e.preventDefault();
+                const fromId = e.dataTransfer.getData(DRAG_CHAT_MIME);
+                if (!fromId || fromId === chat.id) return;
+                const targetIndex = openChats().findIndex((c) => c.id === chat.id);
+                if (targetIndex >= 0) reorderChat(fromId, targetIndex);
+              }}
               onClick={() => {
                 setActiveChatId(chat.id);
-                setMainView('chats');
+                if (mainView() !== 'projects') setMainView('chats');
               }}
-              title={`${chat.title} · ${chat.cwd}`}
+              title={`${chat.title} · ${chat.cwd} · drag to reorder`}
             >
               <span class="ts-chip__name">
                 {chat.title.length > 22 ? chat.title.slice(0, 20) + '…' : chat.title}

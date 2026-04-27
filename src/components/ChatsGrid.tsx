@@ -13,10 +13,13 @@ import {
   renameChat,
   openChats,
   MAX_CHATS_PER_WINDOW,
+  reorderChat,
   type Chat,
 } from '../store/chats';
 import { TerminalView } from './TerminalView';
 import './ChatsGrid.css';
+
+const DRAG_CHAT_MIME = 'application/x-claudedesk-chat-id';
 
 function columnsForCount(n: number): number {
   if (n <= 1) return 1;
@@ -27,23 +30,29 @@ function columnsForCount(n: number): number {
   return 4;
 }
 
-export function ChatsGrid() {
-  const cols = createMemo(() => columnsForCount(openChats().length));
+/**
+ * Optional `chats` overrides the global open-chats list — used by the
+ * Projects view, which needs to show only the chats tagged with its
+ * project id while leaving every other chat alive in the background.
+ */
+export function ChatsGrid(props: { chats?: () => Chat[] } = {}) {
+  const list = createMemo(() => (props.chats ? props.chats() : openChats()));
+  const cols = createMemo(() => columnsForCount(list().length));
 
   return (
     <div class="chats-grid-wrap">
-      <Show when={openChats().length === 0}>
+      <Show when={list().length === 0}>
         <div class="chats-grid__empty">
           Click ▶ on a session in History to open a chat here. Up to
           {' ' + MAX_CHATS_PER_WINDOW} chats fit in this window; after that a new window opens.
         </div>
       </Show>
-      <Show when={openChats().length > 0}>
+      <Show when={list().length > 0}>
         <div
           class="chats-grid"
           style={{ 'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))` }}
         >
-          <For each={openChats()}>{(chat) => <ChatTile chat={chat} />}</For>
+          <For each={list()}>{(chat) => <ChatTile chat={chat} />}</For>
         </div>
       </Show>
     </div>
@@ -58,6 +67,30 @@ function ChatTile(props: { chat: Chat }) {
     const current = props.chat.title;
     const next = window.prompt('Rename chat', current);
     if (next && next.trim() && next !== current) renameChat(props.chat.id, next.trim());
+  }
+
+  // Drag a tile by its header to reorder. We don't use draggable on the
+  // whole tile because that would interfere with text selection inside
+  // the xterm body.
+  function onHeadDragStart(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(DRAG_CHAT_MIME, props.chat.id);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onTileDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function onTileDrop(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
+    e.preventDefault();
+    const fromId = e.dataTransfer.getData(DRAG_CHAT_MIME);
+    if (!fromId || fromId === props.chat.id) return;
+    const targetIndex = openChats().findIndex((c) => c.id === props.chat.id);
+    if (targetIndex >= 0) reorderChat(fromId, targetIndex);
   }
 
   // Observe the tile body so xterm refits when the grid reflows (e.g. when a
@@ -79,8 +112,15 @@ function ChatTile(props: { chat: Chat }) {
     <div
       class={`chat-tile${isActive() ? ' chat-tile--active' : ''}`}
       onClick={() => setActiveChatId(props.chat.id)}
+      onDragOver={onTileDragOver}
+      onDrop={onTileDrop}
     >
-      <div class="chat-tile__head">
+      <div
+        class="chat-tile__head"
+        draggable={true}
+        onDragStart={onHeadDragStart}
+        title="Drag to reorder · double-click title to rename"
+      >
         <span class="chat-tile__title" title={props.chat.cwd} onDblClick={onRename}>
           {props.chat.title}
         </span>

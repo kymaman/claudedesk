@@ -24,8 +24,8 @@ import {
   type Project,
 } from '../store/chat-projects';
 import { sessions, loadSessions } from '../store/sessions-history';
-import { openChats } from '../store/chats';
-import { setMainView } from '../store/mainView';
+import { openChatsInProject, openFreshChat } from '../store/chats';
+import { ChatsGrid } from './ChatsGrid';
 import './ProjectsPanel.css';
 
 const DRAG_MIME = 'application/x-claudedesk-session-id';
@@ -55,6 +55,13 @@ export function ProjectsPanel() {
   const unassignedCount = createMemo(() => {
     const map = sessionProjectMap();
     return sessions().filter((s) => !map[s.sessionId]).length;
+  });
+
+  /** Live chats whose projectId === active project. Re-evaluated reactively
+   *  so opening / closing chats updates the visible tile list immediately. */
+  const projectChats = createMemo(() => {
+    const a = active();
+    return a ? openChatsInProject(a.id) : [];
   });
 
   function beginCreate() {
@@ -183,45 +190,57 @@ export function ProjectsPanel() {
             <>
               <header class="projects-main__head">
                 <h2 class="projects-main__title">{p().name}</h2>
-                <span class="projects-main__count">{sessionsInActive().length} chats</span>
+                <span class="projects-main__count">
+                  {projectChats().length}/{sessionsInActive().length} chats
+                </span>
                 <button
                   class="projects-rail__btn"
                   onClick={() => {
                     void openProject(p().id);
                   }}
-                  title="Open all chats in this project"
+                  title="Resume every saved session in this project (existing live chats stay open)"
                 >
                   ▶ open all
                 </button>
                 <button
                   class="projects-rail__btn"
+                  onClick={() => newChatInProject(p().id)}
+                  title="Create a new chat tagged to this project"
+                >
+                  + new chat
+                </button>
+                <button
+                  class="projects-rail__btn"
                   onClick={() => leaveProject()}
-                  title="Close this project view"
+                  title="Close this project view (chats keep running)"
                 >
                   ✕
                 </button>
               </header>
-              <Show
-                when={openChats().length > 0}
-                fallback={
-                  <div class="projects-main__hint">
-                    Click <strong>▶ open all</strong> to resume every chat assigned to this project.
-                  </div>
-                }
-              >
-                <div class="projects-main__hint">
-                  {openChats().length} chat{openChats().length === 1 ? '' : 's'} running.{' '}
-                  <button class="projects-main__cta" onClick={() => setMainView('chats')}>
-                    Go to Chats tab →
-                  </button>
-                </div>
-              </Show>
+              {/* Chats are filtered to only ones tagged with this project id —
+                  flipping projects here doesn't kill any chat anywhere. */}
+              <div class="projects-main__grid">
+                <ChatsGrid chats={projectChats} />
+              </div>
             </>
           )}
         </Show>
       </section>
     </div>
   );
+
+  function newChatInProject(projectId: string) {
+    // Use the project's first session cwd as the cwd for new chats — that
+    // matches what the user almost always wants (the project's repo). If
+    // no sessions yet, fall back to home (handled by pty.ts when cwd='').
+    const first = sessionsInActive()[0];
+    const cwd = first?.projectPath ?? '';
+    openFreshChat({
+      cwd,
+      title: 'New chat',
+      projectId,
+    });
+  }
 }
 
 function ProjectRow(props: {

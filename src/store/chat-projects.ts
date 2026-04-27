@@ -158,8 +158,20 @@ export async function openProject(projectId: string): Promise<void> {
 
   // (2) Restore any "pending" (intent-only) chats — fresh chats the user
   //     created in this project that didn't yet have a session JSONL when
-  //     the app last closed. Each gets re-spawned as a fresh chat with the
-  //     same cwd/agent/title so the project comes back as it was left.
+  //     the app last closed.
+  //
+  //     For each pending row we try to recover the actual conversation
+  //     by matching against on-disk Claude sessions: a session with the
+  //     same cwd whose date is later than the pending row's createdAt is
+  //     almost certainly the one this pending chat produced. Pendings are
+  //     processed in creation order, picking the oldest unclaimed match
+  //     each time, so consecutive fresh chats in the same cwd line up
+  //     with consecutive sessions.
+  //
+  //     If a match is found → openChatFromSession (--resume) so the
+  //     conversation continues exactly where the user left off.
+  //     If not (process never produced a JSONL, or all matches already
+  //     consumed) → openFreshChat as a last-resort intent restore.
   try {
     const pending = await invoke<
       Array<{
@@ -169,14 +181,33 @@ export async function openProject(projectId: string): Promise<void> {
         title: string;
         extraFlags: string[];
         skipPermissions: boolean;
+        createdAt: number;
       }>
     >(IPC.ListPendingChats, { projectId });
     const alreadyOpenPendingIds = new Set(openChatsInProject(projectId).map((c) => c.id));
-    for (const p of pending) {
+    // sort by createdAt asc so the oldest pending claims the oldest match
+    const pendingByAge = [...pending].sort((a, b) => a.createdAt - b.createdAt);
+    const claimedSessionIds = new Set<string>();
+    for (const p of pendingByAge) {
       if (alreadyOpenPendingIds.has(p.id)) continue;
-      // openFreshChat assigns its own UUID; we don't reuse `p.id` because
-      // it's only meaningful as the persistence key. The pending row is
-      // rewritten when the chat closes.
+      const match = findResumableSession(sessions(), p, claimedSessionIds);
+      if (match) {
+        claimedSessionIds.add(match.sessionId);
+        const saved = await loadLaunchSettings(match.sessionId);
+        openChatFromSession(
+          match,
+          saved ?? {
+            agentId: p.agentId,
+            extraFlags: p.extraFlags,
+            skipPermissions: p.skipPermissions,
+          },
+          { projectId },
+        );
+        continue;
+      }
+      // No on-disk match — fall back to a fresh re-spawn so the user at
+      // least gets a placeholder tab back. They lose conversation history
+      // but the workspace shape is preserved.
       openFreshChat({
         cwd: p.cwd,
         agentId: p.agentId,
@@ -189,6 +220,52 @@ export async function openProject(projectId: string): Promise<void> {
   } catch (err) {
     console.warn('[chat-projects] failed to restore pending chats:', err);
   }
+}
+
+/**
+ * Find the on-disk Claude session that most likely belongs to a pending
+ * chat. Match criteria, in priority order:
+ *   1. Same cwd as the pending row.
+ *   2. Session.date is after the pending.createdAt timestamp (the JSONL
+ *      was created AFTER the pending row was registered).
+ *   3. Not already claimed by an earlier pending in this restore pass.
+ *   4. Pick the oldest of the remaining matches.
+ *
+ * Exported (with the underscore-prefix convention used elsewhere as a
+ * "test-only" hint) so the unit suite can pin behaviour without standing
+ * up the whole openProject path.
+ */
+export function findResumableSession(
+  sessionList: ReadonlyArray<SessionForResume>,
+  pending: { cwd: string; createdAt: number },
+  claimed: ReadonlySet<string>,
+): SessionForResume | null {
+  // Normalise paths (Windows backslashes vs forward) — the same project
+  // can show up either way depending on entry point.
+  const cwdNorm = pending.cwd.replace(/\\/g, '/').toLowerCase();
+  const candidates = sessionList.filter((s) => {
+    if (claimed.has(s.sessionId)) return false;
+    if (s.projectPath.replace(/\\/g, '/').toLowerCase() !== cwdNorm) return false;
+    const sessionMs = Date.parse(s.date);
+    if (Number.isNaN(sessionMs)) return false;
+    return sessionMs >= pending.createdAt;
+  });
+  if (candidates.length === 0) return null;
+  // Oldest first — preserves "first pending claims first session" ordering.
+  candidates.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  return candidates[0] ?? null;
+}
+
+/** Subset of SessionItem used by findResumableSession — kept narrow so the
+ *  helper is easy to unit-test without faking the full SessionItem shape. */
+export interface SessionForResume {
+  sessionId: string;
+  projectPath: string;
+  date: string;
+  title: string;
+  filePath: string;
+  description?: string;
+  folderIds: string[];
 }
 
 /** Leave a project — flip activeProjectId back to null. Chats stay running. */

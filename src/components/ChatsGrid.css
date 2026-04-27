@@ -51,8 +51,8 @@
 }
 
 .chat-tile--active {
-  border-color: var(--accent, #ff3e3e);
-  box-shadow: 0 0 0 1px var(--accent, #ff3e3e);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .chat-tile__head {
@@ -102,7 +102,7 @@
 
 .chat-tile__close:hover {
   color: var(--fg);
-  background: color-mix(in srgb, var(--accent, #ff3e3e) 20%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .chat-tile__body {

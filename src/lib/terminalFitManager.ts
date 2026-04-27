@@ -113,3 +113,16 @@ export function markDirty(id: string): void {
     scheduleFlush();
   }
 }
+
+/**
+ * Force every registered terminal to refit on the next frame. Useful when
+ * the parent layout changes in a way ResizeObserver doesn't notice — e.g.
+ * Chats ↔ History tab toggles where the xterm container's bounding box stays
+ * within the same parent but the surrounding chrome reflows. Without this,
+ * terminals end up rendered at a stale width and look "shifted left" until
+ * the user resizes the window.
+ */
+export function refitAll(): void {
+  for (const entry of entries.values()) entry.dirty = true;
+  scheduleFlush();
+}

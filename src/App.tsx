@@ -15,6 +15,7 @@ import { ProjectsPanel } from './components/ProjectsPanel';
 import { assistantOpen } from './store/assistant';
 import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
+import { refitAll } from './lib/terminalFitManager';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -258,6 +259,20 @@ function App() {
   // xterm's ScreenDprMonitor to re-render at the correct resolution.
   createEffect(() => {
     window.electron.setZoomFactor(store.globalScale);
+  });
+
+  // Layout-changing toggles (tab switch, Ask sidebar) reflow the parent
+  // chrome around xterm tiles. ResizeObserver doesn't always catch these
+  // because the xterm container's bounding box can stay the same while
+  // its surroundings reflow, leaving the terminal rendered at a stale
+  // width ("shifted left"). Force every registered terminal to refit one
+  // frame later.
+  createEffect(() => {
+    // Read both signals so the effect re-runs when either changes.
+    void mainView();
+    void assistantOpen();
+    requestAnimationFrame(() => refitAll());
+    setTimeout(() => refitAll(), 120);
   });
 
   onMount(async () => {

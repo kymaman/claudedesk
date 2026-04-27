@@ -36,6 +36,14 @@ function isEditable(
     return !type || /^(text|search|url|email|tel|password|number)$/i.test(type);
   }
   if (el.tagName === 'TEXTAREA') return true;
+  // xterm renders rows into a sibling tree; the target is usually a
+  // <div>/<span> inside .xterm. Treat anything inside an xterm container
+  // as editable so we can show the right-click menu over the terminal.
+  let n: HTMLElement | null = el;
+  while (n) {
+    if (n.classList?.contains('xterm')) return true;
+    n = n.parentElement;
+  }
   return false;
 }
 
@@ -60,6 +68,28 @@ async function clipboardHasImage(): Promise<boolean> {
   }
 }
 
+/** Walks up from a click target to find the xterm container, if any. */
+function findXtermContainer(el: HTMLElement | null): HTMLElement | null {
+  let n: HTMLElement | null = el;
+  while (n) {
+    if (n.classList?.contains('xterm')) return n;
+    n = n.parentElement;
+  }
+  return null;
+}
+
+/** Read what xterm thinks is currently selected — the helper textarea's
+ *  selection is empty for terminal text. We dispatch a custom event the
+ *  TerminalView listens for and pulls term.getSelection() into the result. */
+function readXtermSelection(xtermEl: HTMLElement): string {
+  const detail = { result: { text: '' } };
+  xtermEl.dispatchEvent(new CustomEvent('claudedesk-copy', { detail, bubbles: true }));
+  if (detail.result.text) return detail.result.text;
+  // Fallback to plain DOM selection (xterm renders text into spans).
+  const sel = window.getSelection()?.toString() ?? '';
+  return sel;
+}
+
 function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) {
   close();
   const menu = document.createElement('div');
@@ -81,16 +111,27 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
     minWidth: '140px',
   } as Partial<CSSStyleDeclaration>);
 
-  const selection = window.getSelection()?.toString() ?? '';
-  const hasSelection =
-    target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+  const xtermEl = findXtermContainer(target);
+  const isXterm = xtermEl !== null;
+
+  const windowSelection = window.getSelection()?.toString() ?? '';
+  const hasSelection = isXterm
+    ? readXtermSelection(xtermEl).length > 0 || windowSelection.length > 0
+    : target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
       ? target.selectionStart !== target.selectionEnd
-      : selection.length > 0;
+      : windowSelection.length > 0;
+
+  const dispatchPasteToXterm = (text: string) => {
+    if (!xtermEl || !text) return;
+    xtermEl.dispatchEvent(new CustomEvent('claudedesk-paste', { detail: { text }, bubbles: true }));
+  };
 
   const items: { label: string; enabled: boolean; action: () => Promise<void> | void }[] = [
     {
       label: 'Cut',
-      enabled: hasSelection,
+      // Cutting from a terminal is meaningless — the user would expect us
+      // to delete their typed input out from under the running process.
+      enabled: hasSelection && !isXterm,
       action: () => {
         const sel = readSelection(target);
         if (!sel) return;
@@ -102,6 +143,11 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
       label: 'Copy',
       enabled: hasSelection,
       action: () => {
+        if (isXterm && xtermEl) {
+          const text = readXtermSelection(xtermEl);
+          if (text) void navigator.clipboard.writeText(text);
+          return;
+        }
         const sel = readSelection(target);
         if (sel) void navigator.clipboard.writeText(sel);
       },
@@ -111,7 +157,15 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
       enabled: true,
       action: async () => {
         const text = await navigator.clipboard.readText();
-        if (text) replaceSelection(target, text);
+        if (!text) return;
+        if (isXterm) {
+          // term.paste() respects bracketedPasteMode, so a multi-line
+          // paste lands in claude CLI as a single block instead of one
+          // Enter-fired send per newline.
+          dispatchPasteToXterm(text);
+          return;
+        }
+        replaceSelection(target, text);
       },
     },
     {
@@ -119,12 +173,13 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
       enabled: imageReady,
       action: async () => {
         try {
-          // Existing IPC reads electron.clipboard.readImage() in the main
-          // process and writes it to a temp PNG, returning the path. We
-          // type that path into the focused element — claude CLI accepts
-          // images by path.
+          // Main-process electron.clipboard.readImage() → temp PNG path.
+          // For xterm: type the path so claude CLI can read it. For
+          // regular fields: insert the path as plain text.
           const filePath = await invoke<string | null>(IPC.SaveClipboardImage);
-          if (filePath) replaceSelection(target, filePath);
+          if (!filePath) return;
+          if (isXterm) dispatchPasteToXterm(filePath);
+          else replaceSelection(target, filePath);
         } catch (err) {
           console.warn('[paste-image] save failed:', err);
         }
@@ -132,7 +187,7 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
     },
     {
       label: 'Select all',
-      enabled: true,
+      enabled: !isXterm,
       action: () => {
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
           target.select();

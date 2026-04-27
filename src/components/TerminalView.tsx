@@ -289,6 +289,39 @@ export function TerminalView(props: TerminalViewProps) {
     fitAddon.fit();
     registerTerminal(agentId, containerRef, fitAddon, term);
 
+    // External paste/copy bridge — dispatched by the right-click context
+    // menu (see lib/editable-context-menu.ts). xterm doesn't expose its
+    // Terminal instance through the DOM, so the menu fires custom events
+    // on the container and we forward them to the live `term` here.
+    //
+    // Paste goes through term.paste(), which respects bracketedPasteMode —
+    // when the app (e.g. claude CLI) has enabled it, the entire pasted
+    // block is wrapped in ESC[200~ ... ESC[201~ and the CLI treats it as
+    // one paste rather than firing send on every embedded newline.
+    const onCdPaste = (e: Event) => {
+      const text = (e as CustomEvent<{ text: string }>).detail?.text;
+      if (typeof text === 'string' && text.length > 0) {
+        try {
+          term?.paste(text);
+        } catch {
+          /* term may be disposed */
+        }
+      }
+    };
+    const onCdCopy = (e: Event) => {
+      try {
+        const sel = term?.getSelection() ?? '';
+        if (sel) void navigator.clipboard.writeText(sel);
+        // Surface the selection back so the menu can fall back to
+        // window.getSelection() if xterm gave us an empty string.
+        (e as CustomEvent<{ result: { text: string } }>).detail.result.text = sel;
+      } catch {
+        /* ignore */
+      }
+    };
+    containerRef.addEventListener('claudedesk-paste', onCdPaste);
+    containerRef.addEventListener('claudedesk-copy', onCdCopy);
+
     // Mount-time sizing race: Solid places the element in the DOM, but the
     // browser may not have settled the layout pass when onMount() runs — so
     // containerRef can report 0×0 and fit() collapses to xterm's 80×24 default.
@@ -621,6 +654,8 @@ export function TerminalView(props: TerminalViewProps) {
       if (resizeFlushTimer !== undefined) clearTimeout(resizeFlushTimer);
       if (outputRaf !== undefined) cancelAnimationFrame(outputRaf);
       onOutput.cleanup?.();
+      containerRef.removeEventListener('claudedesk-paste', onCdPaste);
+      containerRef.removeEventListener('claudedesk-copy', onCdCopy);
       webglAddon?.dispose();
       webglAddon = undefined;
       unregisterTerminal(agentId);

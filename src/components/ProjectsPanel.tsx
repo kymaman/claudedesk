@@ -26,9 +26,8 @@ import {
 import { sessions, loadSessions } from '../store/sessions-history';
 import { openChatsInProject, openFreshChat } from '../store/chats';
 import { ChatsGrid } from './ChatsGrid';
+import { DragMime, dragHasMime } from '../lib/drag-mime';
 import './ProjectsPanel.css';
-
-const DRAG_MIME = 'application/x-claudedesk-session-id';
 
 export function ProjectsPanel() {
   const [creating, setCreating] = createSignal(false);
@@ -94,16 +93,16 @@ export function ProjectsPanel() {
   }
 
   function handleProjectDragOver(e: DragEvent, projectId: string) {
-    if (!e.dataTransfer?.types.includes(DRAG_MIME)) return;
+    if (!dragHasMime(e, DragMime.SessionId)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
     setDragOverProjectId(projectId);
   }
 
   function handleProjectDrop(e: DragEvent, projectId: string) {
     e.preventDefault();
     setDragOverProjectId(null);
-    const sid = e.dataTransfer?.getData(DRAG_MIME);
+    const sid = e.dataTransfer?.getData(DragMime.SessionId);
     if (sid) void assignSessionToProject(sid, projectId);
   }
 

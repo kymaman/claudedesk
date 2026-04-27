@@ -19,9 +19,8 @@ import {
 } from '../store/chats';
 import { activeProjectId } from '../store/chat-projects';
 import { assistantOpen, toggleAssistant } from '../store/assistant';
+import { DragMime, acceptDrag, handleDrop, setDragPayload } from '../lib/drag-mime';
 import './TopSwitcher.css';
-
-const DRAG_CHAT_MIME = 'application/x-claudedesk-chat-id';
 
 interface NavItem {
   id: MainView;
@@ -80,24 +79,13 @@ export function TopSwitcher() {
             <button
               class={`ts-chip ${activeChatId() === chat.id ? 'ts-chip--active' : ''}`}
               draggable={true}
-              onDragStart={(e) => {
-                if (!e.dataTransfer) return;
-                e.dataTransfer.setData(DRAG_CHAT_MIME, chat.id);
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-              onDragOver={(e) => {
-                if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-              }}
-              onDrop={(e) => {
-                if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
-                e.preventDefault();
-                const fromId = e.dataTransfer.getData(DRAG_CHAT_MIME);
-                if (!fromId || fromId === chat.id) return;
+              onDragStart={(e) => setDragPayload(e, DragMime.ChatId, chat.id)}
+              onDragOver={acceptDrag(DragMime.ChatId)}
+              onDrop={handleDrop(DragMime.ChatId, (fromId) => {
+                if (fromId === chat.id) return;
                 const targetIndex = openChats().findIndex((c) => c.id === chat.id);
                 if (targetIndex >= 0) reorderChat(fromId, targetIndex);
-              }}
+              })}
               onClick={() => {
                 setActiveChatId(chat.id);
                 if (mainView() !== 'projects') setMainView('chats');

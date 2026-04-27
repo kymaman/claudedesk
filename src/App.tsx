@@ -16,6 +16,7 @@ import { assistantOpen } from './store/assistant';
 import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
 import { refitAll } from './lib/terminalFitManager';
+import { DragMime } from './lib/drag-mime';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -141,7 +142,7 @@ function App() {
   // (session rows from History) to avoid false positives.
   function mayContainUrl(dt: DataTransfer): boolean {
     if (dt.types.includes('Files')) return false;
-    if (dt.types.includes('application/x-claudedesk-session-id')) return false;
+    if (dt.types.includes(DragMime.SessionId)) return false;
     return dt.types.includes('text/uri-list') || dt.types.includes('text/plain');
   }
 

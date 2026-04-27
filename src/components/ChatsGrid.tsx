@@ -17,9 +17,8 @@ import {
   type Chat,
 } from '../store/chats';
 import { TerminalView } from './TerminalView';
+import { DragMime, acceptDrag, handleDrop, setDragPayload } from '../lib/drag-mime';
 import './ChatsGrid.css';
-
-const DRAG_CHAT_MIME = 'application/x-claudedesk-chat-id';
 
 function columnsForCount(n: number): number {
   if (n <= 1) return 1;
@@ -72,26 +71,17 @@ function ChatTile(props: { chat: Chat }) {
   // Drag a tile by its header to reorder. We don't use draggable on the
   // whole tile because that would interfere with text selection inside
   // the xterm body.
-  function onHeadDragStart(e: DragEvent) {
-    if (!e.dataTransfer) return;
-    e.dataTransfer.setData(DRAG_CHAT_MIME, props.chat.id);
-    e.dataTransfer.effectAllowed = 'move';
-  }
-
-  function onTileDragOver(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  }
-
-  function onTileDrop(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes(DRAG_CHAT_MIME)) return;
-    e.preventDefault();
-    const fromId = e.dataTransfer.getData(DRAG_CHAT_MIME);
-    if (!fromId || fromId === props.chat.id) return;
+  const onHeadDragStart = (e: DragEvent) => setDragPayload(e, DragMime.ChatId, props.chat.id);
+  const onTileDragOver = acceptDrag(DragMime.ChatId);
+  // The drop handler closes over props.chat.id — Solid's lint flags
+  // factory-built handlers as "untracked", but DOM event listeners read
+  // the current props via the closure on each event so this is fine.
+  // eslint-disable-next-line solid/reactivity
+  const onTileDrop = handleDrop(DragMime.ChatId, (fromId) => {
+    if (fromId === props.chat.id) return;
     const targetIndex = openChats().findIndex((c) => c.id === props.chat.id);
     if (targetIndex >= 0) reorderChat(fromId, targetIndex);
-  }
+  });
 
   // Observe the tile body so xterm refits when the grid reflows (e.g. when a
   // second chat is opened and tiles go from 1-wide to 2-wide).

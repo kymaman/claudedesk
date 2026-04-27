@@ -66,13 +66,14 @@ import { hideEmptyFolders, setHideEmptyFolders } from '../store/folder-prefs';
 import { hideSession } from '../store/session-hide';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
+import { DragMime } from '../lib/drag-mime';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
   onClose?: () => void;
 }
 
-const DRAG_MIME = 'application/x-claudedesk-session-id';
+const DRAG_MIME = DragMime.SessionId;
 
 function claudeAgents() {
   const list = store.availableAgents.filter(

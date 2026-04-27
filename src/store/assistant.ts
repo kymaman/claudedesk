@@ -1,38 +1,24 @@
-/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 /**
  * assistant.ts
  * Module-level signal for the "Ask" sidebar visibility. Persisted in
  * localStorage so the sidebar state survives reloads.
  */
 
-import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
+import { createPersistedSignal } from '../lib/persisted-signal';
 
-const KEY = 'claudedesk.assistantOpen';
-
-function loadInitial(): boolean {
-  if (typeof localStorage === 'undefined') return false;
-  try {
-    return localStorage.getItem(KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-const [_open, _setOpen] = createRoot<[Accessor<boolean>, Setter<boolean>]>(() =>
-  createSignal(loadInitial()),
-);
+const [_open, setOpen] = createPersistedSignal<boolean>('claudedesk.assistantOpen', false, {
+  // Old format wrote the literal string '1' / '0' (no JSON quoting), so old
+  // entries surface here as the number 1 or 0 after JSON.parse. Accept both
+  // legacy and the new boolean shape.
+  deserialize: (raw) => raw === true || raw === 1 || raw === '1',
+});
 
 export const assistantOpen = _open;
 
 export function setAssistantOpen(next: boolean): void {
-  _setOpen(next);
-  try {
-    localStorage.setItem(KEY, next ? '1' : '0');
-  } catch {
-    /* storage quota / private mode */
-  }
+  setOpen(next);
 }
 
 export function toggleAssistant(): void {
-  setAssistantOpen(!_open());
+  setOpen(!_open());
 }

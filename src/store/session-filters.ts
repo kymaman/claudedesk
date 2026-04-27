@@ -1,11 +1,10 @@
-/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
 /**
  * session-filters.ts
  * User filters for the History list: sort order, hidden projects,
  * minimum size / duration heuristics. Everything persisted in localStorage.
  */
 
-import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
+import { createPersistedSignal } from '../lib/persisted-signal';
 
 export type SortOrder = 'newest' | 'oldest' | 'project' | 'title';
 
@@ -20,8 +19,6 @@ export interface FilterState {
   extraFolders: string[];
 }
 
-const STORAGE_KEY = 'claudedesk.filters';
-
 const DEFAULT_STATE: FilterState = {
   sort: 'newest',
   hiddenProjects: [],
@@ -30,48 +27,35 @@ const DEFAULT_STATE: FilterState = {
   extraFolders: [],
 };
 
-function loadInitial(): FilterState {
-  if (typeof localStorage === 'undefined') return DEFAULT_STATE;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_STATE;
-    const parsed = JSON.parse(raw) as Partial<FilterState>;
-    return {
-      sort: (parsed.sort as SortOrder) ?? 'newest',
-      hiddenProjects: Array.isArray(parsed.hiddenProjects)
-        ? parsed.hiddenProjects.filter((x): x is string => typeof x === 'string')
-        : [],
-      minDurationSec: typeof parsed.minDurationSec === 'number' ? parsed.minDurationSec : 0,
-      minSizeKb: typeof parsed.minSizeKb === 'number' ? parsed.minSizeKb : 0,
-      extraFolders: Array.isArray(parsed.extraFolders)
-        ? parsed.extraFolders.filter((x): x is string => typeof x === 'string')
-        : [],
-    };
-  } catch {
-    return DEFAULT_STATE;
-  }
+const SORT_VALUES: ReadonlySet<SortOrder> = new Set(['newest', 'oldest', 'project', 'title']);
+
+function normalize(raw: unknown): FilterState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Partial<FilterState>;
+  return {
+    sort:
+      typeof p.sort === 'string' && SORT_VALUES.has(p.sort as SortOrder)
+        ? (p.sort as SortOrder)
+        : 'newest',
+    hiddenProjects: Array.isArray(p.hiddenProjects)
+      ? p.hiddenProjects.filter((x): x is string => typeof x === 'string')
+      : [],
+    minDurationSec: typeof p.minDurationSec === 'number' ? p.minDurationSec : 0,
+    minSizeKb: typeof p.minSizeKb === 'number' ? p.minSizeKb : 0,
+    extraFolders: Array.isArray(p.extraFolders)
+      ? p.extraFolders.filter((x): x is string => typeof x === 'string')
+      : [],
+  };
 }
 
-type RootSig<T> = [Accessor<T>, Setter<T>];
-
-const [_state, _setState] = createRoot<RootSig<FilterState>>(() =>
-  createSignal<FilterState>(loadInitial()),
-);
+const [_state, setState] = createPersistedSignal<FilterState>('claudedesk.filters', DEFAULT_STATE, {
+  validate: normalize,
+});
 
 export const filterState = _state;
 
-function persist(next: FilterState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    /* ignore */
-  }
-}
-
 export function setSortOrder(sort: SortOrder): void {
-  const next = { ..._state(), sort };
-  _setState(next);
-  persist(next);
+  setState({ ..._state(), sort });
 }
 
 export function toggleHiddenProject(projectPath: string): void {
@@ -80,25 +64,17 @@ export function toggleHiddenProject(projectPath: string): void {
   const hiddenProjects = already
     ? curr.hiddenProjects.filter((p) => p !== projectPath)
     : [...curr.hiddenProjects, projectPath];
-  const next = { ...curr, hiddenProjects };
-  _setState(next);
-  persist(next);
+  setState({ ...curr, hiddenProjects });
 }
 
 export function setMinSizeKb(minSizeKb: number): void {
-  const next = { ..._state(), minSizeKb: Math.max(0, minSizeKb) };
-  _setState(next);
-  persist(next);
+  setState({ ..._state(), minSizeKb: Math.max(0, minSizeKb) });
 }
 
 export function setMinDurationSec(minDurationSec: number): void {
-  const next = { ..._state(), minDurationSec: Math.max(0, minDurationSec) };
-  _setState(next);
-  persist(next);
+  setState({ ..._state(), minDurationSec: Math.max(0, minDurationSec) });
 }
 
 export function setExtraFolders(extraFolders: string[]): void {
-  const next = { ..._state(), extraFolders: extraFolders.filter(Boolean) };
-  _setState(next);
-  persist(next);
+  setState({ ..._state(), extraFolders: extraFolders.filter(Boolean) });
 }

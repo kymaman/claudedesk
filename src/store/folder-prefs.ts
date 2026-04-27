@@ -1,32 +1,14 @@
-/* eslint-disable solid/reactivity -- createRoot(() => createSignal(...)) is an intentional HMR-safe pattern; the tuple is destructured at the outer call site, which the linter can't see through the closure. */
-import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
+import { createPersistedSignal } from '../lib/persisted-signal';
 
-const KEY = 'claudedesk.folderPrefs';
-const initial = (() => {
-  try {
-    if (typeof localStorage === 'undefined') return { hideEmpty: false };
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { hideEmpty: false };
-    const p = JSON.parse(raw) as { hideEmpty?: boolean };
-    return { hideEmpty: !!p.hideEmpty };
-  } catch {
-    return { hideEmpty: false };
-  }
-})();
-
-type RootSig<T> = [Accessor<T>, Setter<T>];
-
-const [_hide, _setHide] = createRoot<RootSig<boolean>>(() =>
-  createSignal<boolean>(initial.hideEmpty),
-);
+const [_hide, setHide] = createPersistedSignal<boolean>('claudedesk.folderPrefs', false, {
+  // The previous module persisted as `{ hideEmpty: boolean }` rather than a
+  // raw boolean — keep that shape so existing users' settings survive.
+  serialize: (v) => ({ hideEmpty: v }),
+  deserialize: (raw) =>
+    raw && typeof raw === 'object' && 'hideEmpty' in raw
+      ? Boolean((raw as { hideEmpty: unknown }).hideEmpty)
+      : null,
+});
 
 export const hideEmptyFolders = _hide;
-
-export function setHideEmptyFolders(v: boolean): void {
-  _setHide(v);
-  try {
-    localStorage.setItem(KEY, JSON.stringify({ hideEmpty: v }));
-  } catch {
-    /* ignore */
-  }
-}
+export const setHideEmptyFolders = setHide;

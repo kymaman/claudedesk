@@ -13,7 +13,7 @@ import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { sessions, loadSessions } from './sessions-history';
-import { openChatFromSession, openChatsInProject } from './chats';
+import { openChatFromSession, openChatsInProject, openFreshChat } from './chats';
 import { loadLaunchSettings } from './launch-settings';
 
 export interface Project {
@@ -132,31 +132,95 @@ export function sessionIdsInProject(projectId: string): string[] {
 export async function openProject(projectId: string): Promise<void> {
   setActiveProjectId(projectId);
   if (sessions().length === 0) await loadSessions();
+
+  // (1) Resume saved sessions that belong to this project.
   const projectSessionIds = new Set(sessionIdsInProject(projectId));
-  if (projectSessionIds.size === 0) return;
-  // Don't double-resume — skip any session that already has an open chat
-  // tagged to this project.
-  const alreadyOpen = new Set(
+  const alreadyOpenSessionIds = new Set(
     openChatsInProject(projectId)
       .map((c) => c.sessionId)
       .filter((s): s is string => Boolean(s)),
   );
-  const toOpen = sessions().filter(
-    (s) => projectSessionIds.has(s.sessionId) && !alreadyOpen.has(s.sessionId),
-  );
-  await Promise.all(
-    toOpen.map(async (s) => {
-      const saved = await loadLaunchSettings(s.sessionId);
-      openChatFromSession(
-        s,
-        saved ?? { agentId: 'claude-opus-4-7', extraFlags: [], skipPermissions: false },
-        { projectId },
-      );
-    }),
-  );
+  if (projectSessionIds.size > 0) {
+    const toOpen = sessions().filter(
+      (s) => projectSessionIds.has(s.sessionId) && !alreadyOpenSessionIds.has(s.sessionId),
+    );
+    await Promise.all(
+      toOpen.map(async (s) => {
+        const saved = await loadLaunchSettings(s.sessionId);
+        openChatFromSession(
+          s,
+          saved ?? { agentId: 'claude-opus-4-7', extraFlags: [], skipPermissions: false },
+          { projectId },
+        );
+      }),
+    );
+  }
+
+  // (2) Restore any "pending" (intent-only) chats — fresh chats the user
+  //     created in this project that didn't yet have a session JSONL when
+  //     the app last closed. Each gets re-spawned as a fresh chat with the
+  //     same cwd/agent/title so the project comes back as it was left.
+  try {
+    const pending = await invoke<
+      Array<{
+        id: string;
+        cwd: string;
+        agentId: string;
+        title: string;
+        extraFlags: string[];
+        skipPermissions: boolean;
+      }>
+    >(IPC.ListPendingChats, { projectId });
+    const alreadyOpenPendingIds = new Set(openChatsInProject(projectId).map((c) => c.id));
+    for (const p of pending) {
+      if (alreadyOpenPendingIds.has(p.id)) continue;
+      // openFreshChat assigns its own UUID; we don't reuse `p.id` because
+      // it's only meaningful as the persistence key. The pending row is
+      // rewritten when the chat closes.
+      openFreshChat({
+        cwd: p.cwd,
+        agentId: p.agentId,
+        title: p.title,
+        extraFlags: p.extraFlags,
+        skipPermissions: p.skipPermissions,
+        projectId,
+      });
+    }
+  } catch (err) {
+    console.warn('[chat-projects] failed to restore pending chats:', err);
+  }
 }
 
 /** Leave a project — flip activeProjectId back to null. Chats stay running. */
 export function leaveProject(): void {
   setActiveProjectId(null);
+}
+
+/**
+ * Persist a new fresh chat as "pending" so reopening the project after an
+ * app restart re-creates it. Called from ProjectsPanel right after
+ * `openFreshChat({...projectId})` returns.
+ */
+export async function persistPendingChat(args: {
+  id: string;
+  projectId: string;
+  cwd: string;
+  agentId: string;
+  title: string;
+  extraFlags?: string[];
+  skipPermissions?: boolean;
+}): Promise<void> {
+  try {
+    await invoke<undefined>(IPC.AddPendingChat, args);
+  } catch (err) {
+    console.warn('[chat-projects] persistPendingChat failed:', err);
+  }
+}
+
+export async function dropPendingChat(id: string): Promise<void> {
+  try {
+    await invoke<undefined>(IPC.RemovePendingChat, { id });
+  } catch (err) {
+    console.warn('[chat-projects] dropPendingChat failed:', err);
+  }
 }

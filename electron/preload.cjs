@@ -144,6 +144,9 @@ const ALLOWED_CHANNELS = new Set([
   'assign_session_to_project',
   'list_sessions_in_project',
   'list_session_project_map',
+  'list_pending_chats',
+  'add_pending_chat',
+  'remove_pending_chat',
 ]);
 
 function isAllowedChannel(channel) {

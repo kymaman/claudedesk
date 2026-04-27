@@ -21,6 +21,7 @@ import {
   assignSessionToProject,
   openProject,
   leaveProject,
+  persistPendingChat,
   type Project,
 } from '../store/chat-projects';
 import { sessions, loadSessions } from '../store/sessions-history';
@@ -234,11 +235,24 @@ export function ProjectsPanel() {
     // no sessions yet, fall back to home (handled by pty.ts when cwd='').
     const first = sessionsInActive()[0];
     const cwd = first?.projectPath ?? '';
-    openFreshChat({
+    const chat = openFreshChat({
       cwd,
       title: 'New chat',
       projectId,
     });
+    // Persist intent so this chat survives app restarts. The pending row
+    // is keyed by the chat's id — we drop it on close.
+    if (chat) {
+      void persistPendingChat({
+        id: chat.id,
+        projectId,
+        cwd: chat.cwd,
+        agentId: chat.agentDefId,
+        title: chat.title,
+        extraFlags: chat.settings.extraFlags,
+        skipPermissions: chat.settings.skipPermissions,
+      });
+    }
   }
 }
 

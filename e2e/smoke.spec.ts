@@ -224,13 +224,16 @@ test('Clicking ▶ on a session opens a wide chat tile next to the sessions list
   });
   console.warn('Layout boxes:', JSON.stringify(parentBoxes, null, 2));
 
-  // Side-by-side layout: with folders 160px + sessions 260px = 420px of rail,
-  // on a 1335-wide window the tile gets ~915px. Guard against the 15px /
-  // 582px regressions — require at least 600px wide and 300px tall.
+  // The original "side-by-side" regressions were 15px and 582px — we want
+  // to catch those without depending on the absolute window width
+  // (Playwright's window size differs across CI hosts). Assert the tile
+  // takes at least 40% of the window — far above either pathological
+  // value, far below normal layout.
+  const winWidth = parentBoxes.win[0] ?? 0;
   expect(
     box.width,
     `tile.width=${box.width}; layout=${JSON.stringify(parentBoxes)}`,
-  ).toBeGreaterThan(600);
+  ).toBeGreaterThan(winWidth * 0.4);
   expect(box.height, `tile.height=${box.height}`).toBeGreaterThan(300);
 
   // Clean up

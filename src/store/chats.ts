@@ -11,6 +11,8 @@
 
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { store } from './core';
+import { invoke } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
 import type { SessionItem } from './sessions-history';
 
 export interface ChatLaunchSettings {
@@ -177,6 +179,14 @@ export function openChatsInProject(projectId: string | null): Chat[] {
 }
 
 export function closeChat(chatId: string): void {
+  // If this was a pending (intent-only) chat in a project, drop the
+  // persistence row so the next open of that project doesn't re-spawn it.
+  // Resumed chats (with a sessionId) keep their session_project_map row —
+  // the user can re-resume from History anytime.
+  const chat = _chats().find((c) => c.id === chatId);
+  if (chat && chat.projectId && !chat.sessionId) {
+    void invoke<undefined>(IPC.RemovePendingChat, { id: chatId }).catch(() => undefined);
+  }
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, closed: true } : c)));
   // Prune closed chats after a tick so TerminalView has a chance to run its cleanup.
   setTimeout(() => {

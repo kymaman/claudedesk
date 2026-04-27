@@ -72,6 +72,9 @@ import {
   assignSessionToProject,
   listSessionsInProject,
   listSessionProjectMap,
+  listPendingChats,
+  addPendingChat,
+  removePendingChat,
 } from './workspaces.js';
 import {
   listSessions,
@@ -888,6 +891,38 @@ export function registerAllHandlers(win: BrowserWindow): void {
     return listSessionsInProject(args.projectId);
   });
   ipcMain.handle(IPC.ListSessionProjectMap, () => listSessionProjectMap());
+
+  // Pending (intent-only) chats — fresh chats inside a project that don't
+  // yet have a Claude session JSONL. Persisted so reopening the project
+  // after an app restart re-creates them.
+  ipcMain.handle(IPC.ListPendingChats, (_e, args) => {
+    assertString(args.projectId, 'projectId');
+    return listPendingChats(args.projectId);
+  });
+  ipcMain.handle(IPC.AddPendingChat, (_e, args) => {
+    assertString(args.id, 'id');
+    assertString(args.projectId, 'projectId');
+    assertString(args.cwd, 'cwd');
+    assertString(args.agentId, 'agentId');
+    assertString(args.title, 'title');
+    const extraFlags = Array.isArray(args.extraFlags)
+      ? (args.extraFlags as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    const skipPermissions = args.skipPermissions === true;
+    addPendingChat({
+      id: args.id,
+      projectId: args.projectId,
+      cwd: args.cwd,
+      agentId: args.agentId,
+      title: args.title,
+      extraFlags,
+      skipPermissions,
+    });
+  });
+  ipcMain.handle(IPC.RemovePendingChat, (_e, args) => {
+    assertString(args.id, 'id');
+    removePendingChat(args.id);
+  });
 
   // --- Sessions history ---
   ipcMain.handle(IPC.ListClaudeSessions, (_e, args) => {

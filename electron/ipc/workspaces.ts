@@ -43,8 +43,106 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_session_project_project
       ON session_project_map(project_id);
+
+    -- "Pending" chats — fresh chats started inside a project that haven't
+    -- yet produced a Claude session JSONL on disk. We persist enough
+    -- intent (cwd, agent, title) to recreate them when the user re-opens
+    -- the project after an app restart. Once a chat's sessionId becomes
+    -- known, we move it to session_project_map and delete the pending row.
+    CREATE TABLE IF NOT EXISTS project_pending_chats (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      cwd        TEXT NOT NULL,
+      agent_id   TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      flags_json TEXT NOT NULL DEFAULT '[]',
+      skip_perms INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES chat_projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_project ON project_pending_chats(project_id);
   `);
   return _db;
+}
+
+export interface PendingChat {
+  id: string;
+  projectId: string;
+  cwd: string;
+  agentId: string;
+  title: string;
+  extraFlags: string[];
+  skipPermissions: boolean;
+  createdAt: number;
+}
+
+export function listPendingChats(projectId: string): PendingChat[] {
+  const db = getDb();
+  const rows = db
+    .prepare<
+      [string],
+      {
+        id: string;
+        project_id: string;
+        cwd: string;
+        agent_id: string;
+        title: string;
+        flags_json: string;
+        skip_perms: number;
+        created_at: number;
+      }
+    >(
+      'SELECT id, project_id, cwd, agent_id, title, flags_json, skip_perms, created_at FROM project_pending_chats WHERE project_id = ? ORDER BY created_at ASC',
+    )
+    .all(projectId);
+  return rows.map((r) => {
+    let flags: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(r.flags_json);
+      if (Array.isArray(parsed)) flags = parsed.filter((f): f is string => typeof f === 'string');
+    } catch {
+      /* keep empty */
+    }
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      cwd: r.cwd,
+      agentId: r.agent_id,
+      title: r.title,
+      extraFlags: flags,
+      skipPermissions: r.skip_perms === 1,
+      createdAt: r.created_at,
+    };
+  });
+}
+
+export function addPendingChat(args: {
+  id: string;
+  projectId: string;
+  cwd: string;
+  agentId: string;
+  title: string;
+  extraFlags?: string[];
+  skipPermissions?: boolean;
+}): void {
+  const db = getDb();
+  db.prepare(
+    'INSERT OR REPLACE INTO project_pending_chats (id, project_id, cwd, agent_id, title, flags_json, skip_perms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    args.id,
+    args.projectId,
+    args.cwd,
+    args.agentId,
+    args.title,
+    JSON.stringify(args.extraFlags ?? []),
+    args.skipPermissions ? 1 : 0,
+    Date.now(),
+  );
+}
+
+export function removePendingChat(id: string): void {
+  const db = getDb();
+  db.prepare('DELETE FROM project_pending_chats WHERE id = ?').run(id);
 }
 
 export function listProjects(): Project[] {

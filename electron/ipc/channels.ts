@@ -164,4 +164,7 @@ export enum IPC {
   AssignSessionToProject = 'assign_session_to_project',
   ListSessionsInProject = 'list_sessions_in_project',
   ListSessionProjectMap = 'list_session_project_map',
+  ListPendingChats = 'list_pending_chats',
+  AddPendingChat = 'add_pending_chat',
+  RemovePendingChat = 'remove_pending_chat',
 }

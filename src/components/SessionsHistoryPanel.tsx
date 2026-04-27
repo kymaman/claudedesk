@@ -54,7 +54,9 @@ import {
   type LaunchSettings,
 } from '../store/launch-settings';
 import { openChatFromSession, openChats } from '../store/chats';
+import { sessionProjectMap } from '../store/chat-projects';
 import { ChatsGrid } from './ChatsGrid';
+import { openChatsInProject } from '../store/chats';
 import {
   filterState,
   setSortOrder,
@@ -380,7 +382,9 @@ export function SessionsHistoryPanel(props: Props) {
 
         <Show when={compact()} fallback={<PreviewPane session={hoveredSession()} />}>
           <div class="sessions-panel__chats">
-            <ChatsGrid />
+            {/* Chats tab + History compact view show only chats not assigned to
+                a project — project workspaces are isolated to the Projects tab. */}
+            <ChatsGrid chats={() => openChatsInProject(null)} />
           </div>
         </Show>
       </div>
@@ -675,7 +679,11 @@ function SessionRow(props: {
     if (opening()) return;
     setOpening(true);
     try {
-      openChatFromSession(props.session, settings());
+      // If this session is assigned to a project (sessionProjectMap),
+      // tag the chat with that projectId so it lands in that workspace
+      // instead of the global Chats tab.
+      const projectId = sessionProjectMap()[props.session.sessionId] ?? null;
+      openChatFromSession(props.session, settings(), { projectId });
       // Stay on History: the layout auto-compacts (folders + sessions rail
       // on the left, chats grid on the right). User explicitly asked for
       // the side-by-side view — do NOT jump to a full-screen Chats tab.

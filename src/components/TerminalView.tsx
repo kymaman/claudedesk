@@ -148,6 +148,43 @@ export function TerminalView(props: TerminalViewProps) {
 
     term.open(containerRef);
 
+    // File drag-and-drop into the terminal: drop one or more files from
+    // the OS file manager and the absolute paths get pasted (space-quoted
+    // for safety). Claude CLI accepts a path argument as a file reference
+    // — this is the canonical "show Claude this file" gesture.
+    const onContainerDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    };
+    const onContainerDrop = (e: DragEvent) => {
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      const paths: string[] = [];
+      // Electron exposes the absolute path of dropped OS files via
+      // `webUtils.getPathForFile(file)` — but we can also use the legacy
+      // (still working in current Electron) `file.path` property which
+      // is set on dropped files in renderer.
+      for (let i = 0; i < files.length; i += 1) {
+        const f = files.item(i);
+        if (!f) continue;
+        const p = (f as File & { path?: string }).path ?? '';
+        if (p) {
+          // Quote the path if it contains spaces so the CLI parses it as
+          // a single argument.
+          paths.push(p.includes(' ') ? `"${p}"` : p);
+        }
+      }
+      if (paths.length > 0) enqueueInput(paths.join(' '));
+    };
+    containerRef.addEventListener('dragover', onContainerDragOver);
+    containerRef.addEventListener('drop', onContainerDrop);
+    onCleanup(() => {
+      containerRef.removeEventListener('dragover', onContainerDragOver);
+      containerRef.removeEventListener('drop', onContainerDrop);
+    });
+
     // File path link provider — makes file paths clickable in terminal output
     // Must be registered after term.open() so the DOM is available.
     term.registerLinkProvider({
@@ -254,23 +291,41 @@ export function TerminalView(props: TerminalViewProps) {
       for (const binding of getTerminalBindings()) {
         if (!matchesKeyEvent(e, binding)) continue;
 
-        e.preventDefault();
-
         // Special actions that need custom handling
         if (binding.action === 'copy') {
           const sel = term?.getSelection();
-          if (sel) navigator.clipboard.writeText(sel);
-          return false;
+          if (sel) {
+            e.preventDefault();
+            navigator.clipboard.writeText(sel);
+            return false;
+          }
+          // No selection — let the keystroke through (Ctrl+C → SIGINT,
+          // the canonical terminal behaviour). Don't preventDefault, don't
+          // return false, just keep matching subsequent bindings.
+          continue;
         }
 
+        e.preventDefault();
+
         if (binding.action === 'paste') {
+          e.preventDefault();
+          // Synchronous read via Electron's clipboard (exposed in preload) —
+          // this avoids the previous async race where pressing Enter right
+          // after Ctrl+V would land before the paste content because
+          // navigator.clipboard.readText() resolves on a microtask.
+          // Wispr Flow and similar dictation apps simulate Ctrl+V to deliver
+          // text; the sync path makes them reliable too.
+          const bridge = (window as unknown as { electron?: { clipboardReadText?: () => string } })
+            .electron;
+          const text = bridge?.clipboardReadText?.() ?? '';
+          if (text) {
+            enqueueInput(text);
+            return false;
+          }
+          // No text on clipboard — try image fallback (async is fine here:
+          // there's no Enter race because the user explicitly pasted into
+          // an empty-text scenario).
           (async () => {
-            const text = await navigator.clipboard.readText().catch(() => '');
-            if (text) {
-              enqueueInput(text);
-              return;
-            }
-            // Fall back to clipboard image → save to temp file and paste path
             const filePath = await invoke<string | null>(IPC.SaveClipboardImage);
             if (filePath) enqueueInput(filePath);
           })().catch(() => {});

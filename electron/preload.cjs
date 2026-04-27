@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame } = require('electron');
+const { contextBridge, ipcRenderer, webFrame, clipboard } = require('electron');
 
 // Allowlist of valid IPC channels.
 // IMPORTANT: This list MUST stay in sync with the IPC enum in electron/ipc/channels.ts.
@@ -168,4 +168,11 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   setZoomFactor: (factor) => webFrame.setZoomFactor(factor),
+  /**
+   * Synchronous clipboard read — needed by the xterm paste path so that
+   * pressing Enter immediately after Ctrl+V doesn't race the async
+   * navigator.clipboard.readText() permission flow. Electron's `clipboard`
+   * module is synchronous in the renderer.
+   */
+  clipboardReadText: () => clipboard.readText(),
 });

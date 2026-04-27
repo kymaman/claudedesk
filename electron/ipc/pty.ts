@@ -35,26 +35,32 @@ interface PtySession {
 const sessions = new Map<string, PtySession>();
 
 // --- PTY event bus for spawn/exit notifications ---
+//
+// We expose a thin `onPtyEvent` wrapper around Node's EventEmitter so callers
+// get a consistent unsubscribe-function return (EventEmitter only offers
+// imperative .off()). The previous hand-rolled Map<event, Set<listener>>
+// did the same thing in 22 lines.
+
+import { EventEmitter } from 'node:events';
 
 type PtyEventType = 'spawn' | 'exit' | 'list-changed';
 type PtyEventListener = (agentId: string, data?: unknown) => void;
-const eventListeners = new Map<PtyEventType, Set<PtyEventListener>>();
+
+const ptyEvents = new EventEmitter();
+// PTY lifecycle has no fan-in cap; raise the warning threshold so spawning
+// many agents doesn't trigger Node's "possible memory leak" message.
+ptyEvents.setMaxListeners(0);
 
 /** Register a listener for PTY lifecycle events. Returns an unsubscribe function. */
 export function onPtyEvent(event: PtyEventType, listener: PtyEventListener): () => void {
-  let listeners = eventListeners.get(event);
-  if (!listeners) {
-    listeners = new Set();
-    eventListeners.set(event, listeners);
-  }
-  listeners.add(listener);
+  ptyEvents.on(event, listener);
   return () => {
-    eventListeners.get(event)?.delete(listener);
+    ptyEvents.off(event, listener);
   };
 }
 
 function emitPtyEvent(event: PtyEventType, agentId: string, data?: unknown): void {
-  eventListeners.get(event)?.forEach((fn) => fn(agentId, data));
+  ptyEvents.emit(event, agentId, data);
 }
 
 /** Notify listeners that the agent list has changed (e.g. task deleted). */

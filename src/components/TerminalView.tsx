@@ -15,6 +15,7 @@ import { matchesKeyEvent } from '../lib/keybindings';
 import { store, setTaskLastInputAt } from '../store/store';
 import { terminalDefaults } from '../store/terminal-defaults';
 import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
+import { listenXtermBridge } from '../lib/xterm-bridge';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import type { PtyOutput } from '../ipc/types';
 
@@ -289,38 +290,32 @@ export function TerminalView(props: TerminalViewProps) {
     fitAddon.fit();
     registerTerminal(agentId, containerRef, fitAddon, term);
 
-    // External paste/copy bridge — dispatched by the right-click context
-    // menu (see lib/editable-context-menu.ts). xterm doesn't expose its
-    // Terminal instance through the DOM, so the menu fires custom events
-    // on the container and we forward them to the live `term` here.
-    //
-    // Paste goes through term.paste(), which respects bracketedPasteMode —
-    // when the app (e.g. claude CLI) has enabled it, the entire pasted
-    // block is wrapped in ESC[200~ ... ESC[201~ and the CLI treats it as
-    // one paste rather than firing send on every embedded newline.
-    const onCdPaste = (e: Event) => {
-      const text = (e as CustomEvent<{ text: string }>).detail?.text;
-      if (typeof text === 'string' && text.length > 0) {
+    // External paste/copy bridge — see src/lib/xterm-bridge.ts. The
+    // right-click context menu fires custom events on the .xterm container
+    // (xterm doesn't expose the Terminal instance through the DOM) and we
+    // forward them to the live `term` here. term.paste() respects
+    // bracketedPasteMode so multi-line paste lands as one block.
+    const offBridge = listenXtermBridge(containerRef, {
+      onPaste: ({ text }) => {
+        if (text.length === 0) return;
         try {
           term?.paste(text);
         } catch {
           /* term may be disposed */
         }
-      }
-    };
-    const onCdCopy = (e: Event) => {
-      try {
-        const sel = term?.getSelection() ?? '';
-        if (sel) void navigator.clipboard.writeText(sel);
-        // Surface the selection back so the menu can fall back to
-        // window.getSelection() if xterm gave us an empty string.
-        (e as CustomEvent<{ result: { text: string } }>).detail.result.text = sel;
-      } catch {
-        /* ignore */
-      }
-    };
-    containerRef.addEventListener('claudedesk-paste', onCdPaste);
-    containerRef.addEventListener('claudedesk-copy', onCdCopy);
+      },
+      onCopy: ({ result }) => {
+        try {
+          const sel = term?.getSelection() ?? '';
+          if (sel) void navigator.clipboard.writeText(sel);
+          // Surface the selection back so the menu can fall back to
+          // window.getSelection() if xterm gave us an empty string.
+          result.text = sel;
+        } catch {
+          /* ignore */
+        }
+      },
+    });
 
     // Mount-time sizing race: Solid places the element in the DOM, but the
     // browser may not have settled the layout pass when onMount() runs — so
@@ -654,8 +649,7 @@ export function TerminalView(props: TerminalViewProps) {
       if (resizeFlushTimer !== undefined) clearTimeout(resizeFlushTimer);
       if (outputRaf !== undefined) cancelAnimationFrame(outputRaf);
       onOutput.cleanup?.();
-      containerRef.removeEventListener('claudedesk-paste', onCdPaste);
-      containerRef.removeEventListener('claudedesk-copy', onCdCopy);
+      offBridge();
       webglAddon?.dispose();
       webglAddon = undefined;
       unregisterTerminal(agentId);

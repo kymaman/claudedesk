@@ -13,15 +13,13 @@
  * summaries in SQLite, so this is essentially a formatter.
  */
 
-import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { getAssistantDir } from '../paths.js';
 import { listSessions } from './session-history.js';
 
-const DIR_NAME = 'assistant';
-
 function assistantDir(): string {
-  const dir = path.join(app.getPath('userData'), DIR_NAME);
+  const dir = getAssistantDir();
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

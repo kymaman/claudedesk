@@ -9,9 +9,8 @@ import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 import { randomUUID } from 'crypto';
-import { app } from 'electron';
 import Database from 'better-sqlite3';
-import { homeDir } from '../platform.js';
+import { getClaudeProjectsDir, getSessionAliasesDbPath } from '../paths.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -56,9 +55,7 @@ let _db: Database.Database | null = null;
 
 function getDb(): Database.Database {
   if (_db) return _db;
-  const dir = app.getPath('userData');
-  const dbPath = path.join(dir, 'session-aliases.db');
-  _db = new Database(dbPath);
+  _db = new Database(getSessionAliasesDbPath());
   _db.exec(`
     CREATE TABLE IF NOT EXISTS session_aliases (
       session_id TEXT PRIMARY KEY,
@@ -348,7 +345,7 @@ interface IndexEntry {
   description: string;
 }
 
-const INDEX_PATH = path.join(homeDir(), '.claude', 'projects', 'SESSIONS_INDEX.md');
+const INDEX_PATH = path.join(getClaudeProjectsDir(), 'SESSIONS_INDEX.md');
 
 function parseSessionsIndex(): Map<string, IndexEntry> {
   const map = new Map<string, IndexEntry>();
@@ -596,7 +593,7 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
 // ---------------------------------------------------------------------------
 
 export async function listSessions(extraFolders?: string[]): Promise<SessionItem[]> {
-  const defaultRoot = path.join(homeDir(), '.claude', 'projects');
+  const defaultRoot = getClaudeProjectsDir();
   const index = parseSessionsIndex();
 
   const rawSessions: RawSession[] = [];

@@ -10,10 +10,9 @@
  * Every user-facing string says "Project".
  */
 
-import { app } from 'electron';
-import path from 'path';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { getWorkspacesDbPath } from '../paths.js';
 
 export interface Project {
   id: string;
@@ -27,9 +26,7 @@ let _db: Database.Database | null = null;
 
 function getDb(): Database.Database {
   if (_db) return _db;
-  const dir = app.getPath('userData');
-  const dbPath = path.join(dir, 'workspaces.db');
-  _db = new Database(dbPath);
+  _db = new Database(getWorkspacesDbPath());
   _db.exec(`
     CREATE TABLE IF NOT EXISTS chat_projects (
       id         TEXT PRIMARY KEY,

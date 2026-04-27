@@ -17,6 +17,7 @@
 
 import { invoke } from './ipc';
 import { IPC } from '../../electron/ipc/channels';
+import { dispatchXtermPaste, readXtermSelection } from './xterm-bridge';
 
 interface State {
   el: HTMLDivElement | null;
@@ -78,16 +79,12 @@ function findXtermContainer(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-/** Read what xterm thinks is currently selected — the helper textarea's
- *  selection is empty for terminal text. We dispatch a custom event the
- *  TerminalView listens for and pulls term.getSelection() into the result. */
-function readXtermSelection(xtermEl: HTMLElement): string {
-  const detail = { result: { text: '' } };
-  xtermEl.dispatchEvent(new CustomEvent('claudedesk-copy', { detail, bubbles: true }));
-  if (detail.result.text) return detail.result.text;
-  // Fallback to plain DOM selection (xterm renders text into spans).
-  const sel = window.getSelection()?.toString() ?? '';
-  return sel;
+/** Read xterm's current selection — falls back to the DOM's window.getSelection
+ *  when xterm has nothing (e.g. user dragged across rendered span text). */
+function readXtermSelectionWithFallback(xtermEl: HTMLElement): string {
+  const fromXterm = readXtermSelection(xtermEl);
+  if (fromXterm) return fromXterm;
+  return window.getSelection()?.toString() ?? '';
 }
 
 function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) {
@@ -116,14 +113,14 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
 
   const windowSelection = window.getSelection()?.toString() ?? '';
   const hasSelection = isXterm
-    ? readXtermSelection(xtermEl).length > 0 || windowSelection.length > 0
+    ? readXtermSelectionWithFallback(xtermEl).length > 0
     : target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
       ? target.selectionStart !== target.selectionEnd
       : windowSelection.length > 0;
 
   const dispatchPasteToXterm = (text: string) => {
     if (!xtermEl || !text) return;
-    xtermEl.dispatchEvent(new CustomEvent('claudedesk-paste', { detail: { text }, bubbles: true }));
+    dispatchXtermPaste(xtermEl, text);
   };
 
   const items: { label: string; enabled: boolean; action: () => Promise<void> | void }[] = [
@@ -144,7 +141,7 @@ function openAt(x: number, y: number, target: HTMLElement, imageReady: boolean) 
       enabled: hasSelection,
       action: () => {
         if (isXterm && xtermEl) {
-          const text = readXtermSelection(xtermEl);
+          const text = readXtermSelectionWithFallback(xtermEl);
           if (text) void navigator.clipboard.writeText(text);
           return;
         }

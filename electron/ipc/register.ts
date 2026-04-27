@@ -101,6 +101,7 @@ import {
   assertOptionalString,
   assertOptionalBoolean,
 } from './validate.js';
+import { registerHandler } from './register-helpers.js';
 
 /** Reject paths that are non-absolute or attempt directory traversal. */
 function validatePath(p: unknown, label: string): void {
@@ -866,14 +867,15 @@ export function registerAllHandlers(win: BrowserWindow): void {
     const color = typeof args.color === 'string' ? args.color : undefined;
     return createProjectWs({ name: args.name, ...(color ? { color } : {}) });
   });
-  ipcMain.handle(IPC.RenameProject, (_e, args) => {
-    assertString(args.id, 'id');
-    assertString(args.name, 'name');
-    renameProjectWs({ id: args.id, name: args.name });
+  registerHandler<{ id: string; name: string }>({
+    channel: IPC.RenameProject,
+    schema: { id: 'string', name: 'string' },
+    handler: ({ id, name }) => renameProjectWs({ id, name }),
   });
-  ipcMain.handle(IPC.DeleteProject, (_e, args) => {
-    assertString(args.id, 'id');
-    deleteProjectWs({ id: args.id });
+  registerHandler<{ id: string }>({
+    channel: IPC.DeleteProject,
+    schema: { id: 'string' },
+    handler: ({ id }) => deleteProjectWs({ id }),
   });
   ipcMain.handle(IPC.AssignSessionToProject, (_e, args) => {
     assertString(args.sessionId, 'sessionId');
@@ -886,9 +888,10 @@ export function registerAllHandlers(win: BrowserWindow): void {
           })();
     assignSessionToProject({ sessionId: args.sessionId, projectId });
   });
-  ipcMain.handle(IPC.ListSessionsInProject, (_e, args) => {
-    assertString(args.projectId, 'projectId');
-    return listSessionsInProject(args.projectId);
+  registerHandler<{ projectId: string }>({
+    channel: IPC.ListSessionsInProject,
+    schema: { projectId: 'string' },
+    handler: ({ projectId }) => listSessionsInProject(projectId),
   });
   ipcMain.handle(IPC.ListSessionProjectMap, () => listSessionProjectMap());
 
@@ -932,15 +935,16 @@ export function registerAllHandlers(win: BrowserWindow): void {
     return listSessions(extraFolders);
   });
 
-  ipcMain.handle(IPC.GetClaudeSessionPreview, (_e, args) => {
-    validatePath(args.filePath, 'filePath');
-    return getSessionPreview(args.filePath);
+  registerHandler<{ filePath: string }>({
+    channel: IPC.GetClaudeSessionPreview,
+    schema: { filePath: 'path' },
+    handler: ({ filePath }) => getSessionPreview(filePath),
   });
 
-  ipcMain.handle(IPC.RenameClaudeSession, (_e, args) => {
-    assertString(args.sessionId, 'sessionId');
-    assertString(args.alias, 'alias');
-    return renameSession(args.sessionId, args.alias);
+  registerHandler<{ sessionId: string; alias: string }>({
+    channel: IPC.RenameClaudeSession,
+    schema: { sessionId: 'string', alias: 'string' },
+    handler: ({ sessionId, alias }) => renameSession(sessionId, alias),
   });
 
   // --- Folders (History view organization) ---
@@ -952,32 +956,34 @@ export function registerAllHandlers(win: BrowserWindow): void {
     return createFolder({ name: args.name, ...(color ? { color } : {}) });
   });
 
-  ipcMain.handle(IPC.RenameFolder, (_e, args) => {
-    assertString(args.id, 'id');
-    assertString(args.name, 'name');
-    renameFolder({ id: args.id, name: args.name });
+  registerHandler<{ id: string; name: string }>({
+    channel: IPC.RenameFolder,
+    schema: { id: 'string', name: 'string' },
+    handler: ({ id, name }) => renameFolder({ id, name }),
   });
 
-  ipcMain.handle(IPC.DeleteFolder, (_e, args) => {
-    assertString(args.id, 'id');
-    deleteFolder({ id: args.id });
+  registerHandler<{ id: string }>({
+    channel: IPC.DeleteFolder,
+    schema: { id: 'string' },
+    handler: ({ id }) => deleteFolder({ id }),
   });
 
-  ipcMain.handle(IPC.AddSessionToFolder, (_e, args) => {
-    assertString(args.sessionId, 'sessionId');
-    assertString(args.folderId, 'folderId');
-    addSessionToFolder({ sessionId: args.sessionId, folderId: args.folderId });
+  registerHandler<{ sessionId: string; folderId: string }>({
+    channel: IPC.AddSessionToFolder,
+    schema: { sessionId: 'string', folderId: 'string' },
+    handler: ({ sessionId, folderId }) => addSessionToFolder({ sessionId, folderId }),
   });
 
-  ipcMain.handle(IPC.RemoveSessionFromFolder, (_e, args) => {
-    assertString(args.sessionId, 'sessionId');
-    assertString(args.folderId, 'folderId');
-    removeSessionFromFolder({ sessionId: args.sessionId, folderId: args.folderId });
+  registerHandler<{ sessionId: string; folderId: string }>({
+    channel: IPC.RemoveSessionFromFolder,
+    schema: { sessionId: 'string', folderId: 'string' },
+    handler: ({ sessionId, folderId }) => removeSessionFromFolder({ sessionId, folderId }),
   });
 
-  ipcMain.handle(IPC.GetLaunchSettings, (_e, args) => {
-    assertString(args.sessionId, 'sessionId');
-    return getLaunchSettings(args.sessionId);
+  registerHandler<{ sessionId: string }>({
+    channel: IPC.GetLaunchSettings,
+    schema: { sessionId: 'string' },
+    handler: ({ sessionId }) => getLaunchSettings(sessionId),
   });
 
   ipcMain.handle(IPC.SetLaunchSettings, (_e, args) => {
@@ -998,10 +1004,10 @@ export function registerAllHandlers(win: BrowserWindow): void {
     pinFolder({ id: args.id, pinned: Boolean(args.pinned) });
   });
 
-  ipcMain.handle(IPC.DeleteSessionFile, (_e, args) => {
-    assertString(args.sessionId, 'sessionId');
-    validatePath(args.filePath, 'filePath');
-    return deleteSessionFile({ sessionId: args.sessionId, filePath: args.filePath });
+  registerHandler<{ sessionId: string; filePath: string }>({
+    channel: IPC.DeleteSessionFile,
+    schema: { sessionId: 'string', filePath: 'path' },
+    handler: ({ sessionId, filePath }) => deleteSessionFile({ sessionId, filePath }),
   });
 
   // --- Forward window events to renderer ---

@@ -74,6 +74,42 @@ function resolveAgent(agentDefId: string) {
   );
 }
 
+/**
+ * Internal: assemble a Chat record from already-resolved primitives, append it
+ * to the in-memory list, and mark it active. Both `openChatFromSession` and
+ * `openFreshChat` funnel through here — they only differ in how they derive
+ * the title/cwd/args. Keeping a single Chat-shape constructor avoids the two
+ * paths drifting out of sync (e.g. one forgetting `projectId`).
+ */
+function buildChat(params: {
+  id: string;
+  sessionId?: string;
+  title: string;
+  cwd: string;
+  baseAgent: { id: string; command: string };
+  args: string[];
+  settings: ChatLaunchSettings;
+  projectId?: string | null;
+}): Chat {
+  const chat: Chat = {
+    id: params.id,
+    ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
+    title: params.title,
+    cwd: params.cwd,
+    agentDefId: params.baseAgent.id,
+    command: params.baseAgent.command,
+    args: params.args,
+    env: {},
+    settings: params.settings,
+    projectId: params.projectId ?? null,
+    createdAt: Date.now(),
+    closed: false,
+  };
+  _setChats((prev) => [...prev, chat]);
+  _setActiveChatId(chat.id);
+  return chat;
+}
+
 export function openChatFromSession(
   session: SessionItem,
   settings: ChatLaunchSettings,
@@ -92,23 +128,16 @@ export function openChatFromSession(
     ...settings.extraFlags,
   ];
 
-  const chat: Chat = {
+  return buildChat({
     id: crypto.randomUUID(),
     sessionId: session.sessionId,
     title: session.title || session.sessionId.slice(0, 8),
     cwd: session.projectPath,
-    agentDefId: baseAgent.id,
-    command: baseAgent.command,
+    baseAgent,
     args,
-    env: {},
     settings,
     projectId: options.projectId ?? null,
-    createdAt: Date.now(),
-    closed: false,
-  };
-  _setChats((prev) => [...prev, chat]);
-  _setActiveChatId(chat.id);
-  return chat;
+  });
 }
 
 export function openFreshChat(params: {
@@ -128,26 +157,20 @@ export function openFreshChat(params: {
     ...(params.skipPermissions ? baseAgent.skip_permissions_args : []),
     ...(params.extraFlags ?? []),
   ];
-  const chat: Chat = {
+  const settings: ChatLaunchSettings = {
+    agentId: baseAgent.id,
+    extraFlags: params.extraFlags ?? [],
+    skipPermissions: params.skipPermissions ?? false,
+  };
+  return buildChat({
     id: crypto.randomUUID(),
     title: params.title ?? 'New chat',
     cwd: params.cwd,
-    agentDefId: baseAgent.id,
-    command: baseAgent.command,
+    baseAgent,
     args,
-    env: {},
-    settings: {
-      agentId: baseAgent.id,
-      extraFlags: params.extraFlags ?? [],
-      skipPermissions: params.skipPermissions ?? false,
-    },
+    settings,
     projectId: params.projectId ?? null,
-    createdAt: Date.now(),
-    closed: false,
-  };
-  _setChats((prev) => [...prev, chat]);
-  _setActiveChatId(chat.id);
-  return chat;
+  });
 }
 
 /**

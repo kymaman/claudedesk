@@ -1,5 +1,5 @@
-import { Show, createEffect, type JSX } from 'solid-js';
-import { Dialog } from './Dialog';
+import { createEffect, type JSX } from 'solid-js';
+import { DialogShell, DialogFooter, DialogCancelButton, DialogPrimaryButton } from './DialogShell';
 import { theme } from '../lib/theme';
 
 interface ConfirmDialogProps {
@@ -36,73 +36,33 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   });
 
   return (
-    <Dialog open={props.open} onClose={props.onCancel} width={props.width}>
-      <h2
-        style={{
-          margin: '0',
-          'font-size': '17px',
-          color: theme.fg,
-          'font-weight': '600',
-        }}
-      >
-        {props.title}
-      </h2>
-
+    <DialogShell
+      open={props.open}
+      title={props.title}
+      onClose={props.onCancel}
+      {...(props.width !== undefined ? { width: props.width } : {})}
+      footer={
+        <DialogFooter>
+          <DialogCancelButton
+            ref={(el) => {
+              cancelRef = el;
+            }}
+            onClick={props.onCancel}
+            label={props.cancelLabel ?? 'Cancel'}
+          />
+          <DialogPrimaryButton
+            onClick={props.onConfirm}
+            label={props.confirmLabel ?? 'Confirm'}
+            {...(props.confirmDisabled !== undefined ? { disabled: props.confirmDisabled } : {})}
+            {...(props.confirmLoading !== undefined ? { loading: props.confirmLoading } : {})}
+            {...(props.danger !== undefined ? { danger: props.danger } : {})}
+          />
+        </DialogFooter>
+      }
+    >
       <div style={{ 'font-size': '14px', color: theme.fgMuted, 'line-height': '1.5' }}>
         {props.message}
       </div>
-
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          'justify-content': 'flex-end',
-          'padding-top': '4px',
-        }}
-      >
-        <button
-          ref={cancelRef}
-          type="button"
-          class="btn-secondary"
-          onClick={() => props.onCancel()}
-          style={{
-            padding: '9px 18px',
-            background: theme.bgInput,
-            border: `1px solid ${theme.border}`,
-            'border-radius': '8px',
-            color: theme.fgMuted,
-            cursor: 'pointer',
-            'font-size': '14px',
-          }}
-        >
-          {props.cancelLabel ?? 'Cancel'}
-        </button>
-        <button
-          type="button"
-          class={props.danger ? 'btn-danger' : 'btn-primary'}
-          disabled={props.confirmDisabled}
-          onClick={() => props.onConfirm()}
-          style={{
-            padding: '9px 20px',
-            background: props.danger ? theme.error : theme.accent,
-            border: 'none',
-            'border-radius': '8px',
-            color: props.danger ? '#fff' : theme.accentText,
-            cursor: props.confirmDisabled ? 'not-allowed' : 'pointer',
-            'font-size': '14px',
-            'font-weight': '500',
-            opacity: props.confirmDisabled ? '0.5' : '1',
-            display: 'inline-flex',
-            'align-items': 'center',
-            gap: '8px',
-          }}
-        >
-          <Show when={props.confirmLoading}>
-            <span class="inline-spinner" aria-hidden="true" />
-          </Show>
-          {props.confirmLabel ?? 'Confirm'}
-        </button>
-      </div>
-    </Dialog>
+    </DialogShell>
   );
 }

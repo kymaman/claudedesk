@@ -715,6 +715,11 @@ export function setStepsContent(taskId: string, steps: unknown[] | null): void {
 }
 
 export function setTaskLastInputAt(taskId: string): void {
+  // Chat tiles re-use TerminalView with a fresh chat.id as the taskId —
+  // those ids never exist in store.tasks (chats are tracked separately).
+  // Without the guard, setStore on a missing path throws once the chat
+  // sends a multi-line paste, killing the input pipeline.
+  if (!store.tasks[taskId]) return;
   setStore('tasks', taskId, 'lastInputAt', new Date().toISOString());
 }
 

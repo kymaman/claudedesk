@@ -319,7 +319,20 @@ export function TerminalView(props: TerminalViewProps) {
             .electron;
           const text = bridge?.clipboardReadText?.() ?? '';
           if (text) {
-            enqueueInput(text);
+            // Use term.paste() so multi-line pastes get wrapped in
+            // \e[200~ … \e[201~ (bracketed paste). Otherwise embedded
+            // newlines are interpreted as Enter and the CLI submits
+            // the first line — making the rest of the paste "disappear".
+            // term.paste() routes through term.onData → enqueueInput,
+            // so the keystroke still ends up in pendingInput as a single
+            // batch.
+            try {
+              term?.paste(text);
+            } catch {
+              // term may have been disposed mid-keypress; fall back to raw
+              // enqueue so the user's input isn't silently dropped.
+              enqueueInput(text);
+            }
             return false;
           }
           // No text on clipboard — try image fallback (async is fine here:
@@ -342,8 +355,25 @@ export function TerminalView(props: TerminalViewProps) {
       return true;
     });
 
-    fitAddon.fit();
+    // Register BEFORE first fit so terminalFitManager's ResizeObserver
+    // catches every container size change from the very first frame.
+    // Previously the order was reversed and any layout reflow between
+    // first fit() and register was missed → xterm stuck at small cols.
     registerTerminal(agentId, containerRef, fitAddon, term);
+    fitAddon.fit();
+
+    // Expose the live Terminal on the .xterm container so e2e tests
+    // (and devtools sessions) can drive it programmatically — most
+    // notably, the bracketed-paste contract is verified by calling
+    // term.paste() and reading what would reach the PTY. The reference
+    // is read-only from the test side; the cost in production is one
+    // hidden property per chat tile.
+    {
+      const xtermEl = containerRef.querySelector('.xterm');
+      if (xtermEl) {
+        (xtermEl as unknown as { __term?: Terminal }).__term = term;
+      }
+    }
 
     // External paste/copy bridge — see src/lib/xterm-bridge.ts. The
     // right-click context menu fires custom events on the .xterm container
@@ -375,22 +405,29 @@ export function TerminalView(props: TerminalViewProps) {
     // Mount-time sizing race: Solid places the element in the DOM, but the
     // browser may not have settled the layout pass when onMount() runs — so
     // containerRef can report 0×0 and fit() collapses to xterm's 80×24 default.
-    // Re-fit on next frame and once more after fonts load. Each call is cheap
-    // and the FitAddon no-ops when the grid size hasn't changed.
-    requestAnimationFrame(() => {
+    // Re-fit on next frame and several times after fonts/layouts settle.
+    //
+    // The 0/120/400/1200ms ladder catches:
+    //   0    — current frame after Solid mount
+    //   120  — after style + font load
+    //   400  — after async data populates the parent (e.g. session list
+    //          finishes loading and chat-tile body grows)
+    //   1200 — after the user has likely seen the chat — last safety net for
+    //          the "text in a narrow column" rendering bug, which happens
+    //          when fit() grabbed cols from a stale layout snapshot.
+    //
+    // FitAddon no-ops when grid size hasn't changed, so extra fits are cheap.
+    const refit = () => {
       try {
         fitAddon?.fit();
       } catch {
         /* term may already be disposed */
       }
-    });
-    setTimeout(() => {
-      try {
-        fitAddon?.fit();
-      } catch {
-        /* ignore */
-      }
-    }, 120);
+    };
+    requestAnimationFrame(refit);
+    setTimeout(refit, 120);
+    setTimeout(refit, 400);
+    setTimeout(refit, 1200);
 
     if (props.autoFocus) {
       term.focus();
@@ -611,6 +648,26 @@ export function TerminalView(props: TerminalViewProps) {
     createEffect(() => {
       if (!term) return;
       term.options.cursorBlink = props.isFocused === true;
+    });
+
+    // Auto-focus the terminal whenever it becomes the active chat — covers
+    // both initial open ("I clicked Resume, why can't I type?") and TopSwitcher
+    // chip clicks (clicking another chat tab should focus its terminal).
+    // Without this, the user has to click inside the xterm container before
+    // typing — which the user reported as a UX paper-cut.
+    createEffect(() => {
+      if (!term) return;
+      if (props.isFocused === true) {
+        // Defer to next frame so a fresh tile that just mounted has its
+        // canvas in the DOM — focus() on a 0×0 element is a no-op.
+        requestAnimationFrame(() => {
+          try {
+            term?.focus();
+          } catch {
+            /* disposed */
+          }
+        });
+      }
     });
 
     // Load WebGL addon for all terminals. On context loss (e.g. too many

@@ -18,6 +18,7 @@ import {
 } from '../store/chats';
 import { TerminalView } from './TerminalView';
 import { DragMime, acceptDrag, dragHasMime, handleDrop, setDragPayload } from '../lib/drag-mime';
+import { markDirty } from '../lib/terminalFitManager';
 import './ChatsGrid.css';
 
 function columnsForCount(n: number): number {
@@ -30,35 +31,48 @@ function columnsForCount(n: number): number {
 }
 
 /**
- * Optional `chats` overrides the global open-chats list — used by the
- * Projects view, which needs to show only the chats tagged with its
- * project id while leaving every other chat alive in the background.
+ * `chats` is the full population the grid is responsible for keeping
+ * mounted. `visible`, when present, decides which subset of those chats
+ * is actually shown — non-matching tiles get `display:none` instead of
+ * being unmounted, so their xterm + PTY survive the toggle.
+ *
+ * The projects view passes ALL project-tagged chats as `chats` and the
+ * active project's filter as `visible` — flipping projects becomes a
+ * pure CSS swap. Without this split the Solid `<For>` removes tiles on
+ * project switch, TerminalView.onCleanup fires, and the PTY dies.
  */
-export function ChatsGrid(props: { chats?: () => Chat[] } = {}) {
+export function ChatsGrid(props: { chats?: () => Chat[]; visible?: (c: Chat) => boolean } = {}) {
   const list = createMemo(() => (props.chats ? props.chats() : openChats()));
-  const cols = createMemo(() => columnsForCount(list().length));
+  const isVisible = (c: Chat) => (props.visible ? props.visible(c) : true);
+  const visibleCount = createMemo(() => list().filter(isVisible).length);
+  const cols = createMemo(() => columnsForCount(visibleCount()));
 
   return (
     <div class="chats-grid-wrap">
-      <Show when={list().length === 0}>
+      <Show when={visibleCount() === 0}>
         <div class="chats-grid__empty">
           Click ▶ on a session in History to open a chat here. Up to
           {' ' + MAX_CHATS_PER_WINDOW} chats fit in this window; after that a new window opens.
         </div>
       </Show>
-      <Show when={list().length > 0}>
-        <div
-          class="chats-grid"
-          style={{ 'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))` }}
-        >
-          <For each={list()}>{(chat) => <ChatTile chat={chat} />}</For>
-        </div>
-      </Show>
+      <div
+        class="chats-grid"
+        style={{
+          'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))`,
+          // Keep the grid in the DOM even when nothing is visible — the
+          // <Show> above renders the empty hint on top. Hiding via display
+          // when there are no visible tiles avoids a stray empty grid box
+          // showing between the hint and the parent container.
+          display: visibleCount() === 0 ? 'none' : 'grid',
+        }}
+      >
+        <For each={list()}>{(chat) => <ChatTile chat={chat} hidden={!isVisible(chat)} />}</For>
+      </div>
     </div>
   );
 }
 
-function ChatTile(props: { chat: Chat }) {
+function ChatTile(props: { chat: Chat; hidden?: boolean }) {
   const isActive = () => activeChatId() === props.chat.id;
   // True while another tile is being dragged over this one — drives the
   // drop-target ring so the user can see exactly where the drop will land.
@@ -97,15 +111,16 @@ function ChatTile(props: { chat: Chat }) {
 
   // Observe the tile body so xterm refits when the grid reflows (e.g. when a
   // second chat is opened and tiles go from 1-wide to 2-wide).
+  //
+  // Previously this dispatched a `window.resize` event, which terminalFitManager
+  // does NOT listen to — so the fit was a no-op and the user saw "text in a
+  // narrow column on the right" because xterm cols were stuck at the initial
+  // (small / pre-layout) width. Now we call markDirty(chat.id) directly,
+  // which queues a fit on the next animation frame in the manager.
   let bodyRef!: HTMLDivElement;
   onMount(() => {
     if (!bodyRef || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => {
-      // markDirty in terminalFitManager re-runs fit(); imported as side effect
-      // via TerminalView, but we re-dispatch a window resize so the fit manager
-      // picks up the tile's new size even before its internal debounce.
-      window.dispatchEvent(new Event('resize'));
-    });
+    const ro = new ResizeObserver(() => markDirty(props.chat.id));
     ro.observe(bodyRef);
     onCleanup(() => ro.disconnect());
   });
@@ -115,6 +130,10 @@ function ChatTile(props: { chat: Chat }) {
       class={`chat-tile${isActive() ? ' chat-tile--active' : ''}${
         isDropTarget() ? ' chat-tile--drop-target' : ''
       }`}
+      // `hidden` toggles display:none. The DOM stays put, xterm canvas
+      // keeps its rendered state, and onCleanup never runs — so the PTY
+      // survives a project / tab switch.
+      style={props.hidden ? { display: 'none' } : undefined}
       onClick={() => setActiveChatId(props.chat.id)}
       onDragOver={onTileDragOver}
       onDragLeave={onTileDragLeave}
@@ -151,6 +170,11 @@ function ChatTile(props: { chat: Chat }) {
           env={props.chat.env}
           isShell={false}
           fontSize={13}
+          // The active tile auto-focuses on mount AND every time it
+          // becomes active (TerminalView's createEffect on isFocused).
+          // autoFocus on first mount handles the very first chat open.
+          autoFocus={isActive()}
+          isFocused={isActive()}
         />
       </div>
     </div>

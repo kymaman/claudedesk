@@ -242,10 +242,11 @@ test('Project + new chat: persisted as pending and absent from the global Chats 
   // projectId are filtered out of the global view.
   await win.locator('.ts-nav', { hasText: 'Chats' }).click();
   await win.waitForTimeout(300);
-  // The chat we just created should not appear here. The Chats tab
-  // re-uses .chat-tile, but the openChatsInProject(null) filter hides
-  // project-tagged chats.
-  const globalChats = win.locator('.chats-grid > .chat-tile');
+  // Scope to the History/Chats panel only — the Projects panel now
+  // stays mounted across mainView changes (display:none) and contains
+  // its own .chats-grid with the project-tagged tile, so an unscoped
+  // selector would aggregate both grids and falsely report a leak.
+  const globalChats = win.locator('.sessions-panel__chats .chats-grid > .chat-tile');
   expect(await globalChats.count()).toBe(0);
 
   // Confirm via IPC: pending row exists for this project.

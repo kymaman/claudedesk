@@ -128,10 +128,22 @@ export function sessionIdsInProject(projectId: string): string[] {
  * (and tagged with this projectId so they show in the project view). Chats
  * already alive elsewhere are NOT touched — switching workspaces never
  * kills work in progress.
+ *
+ * Re-entrancy is intentional: clicking the same project again is a no-op
+ * for already-open chats (the dedup checks below cover that). What it
+ * SHOULDN'T do is duplicate a tile, which the previous version could —
+ * a pending chat that had been successfully resumed once stayed in the
+ * DB under its original id, but the resumed chat got a fresh UUID, so
+ * the dedup-by-id check missed and a second tile spawned. We now drop
+ * the pending row + write a session→project map row at resume time, so
+ * the row simply doesn't exist on the next pass.
  */
 export async function openProject(projectId: string): Promise<void> {
   setActiveProjectId(projectId);
-  if (sessions().length === 0) await loadSessions();
+  // Always refresh the session list — a "+ new chat" earlier in this
+  // session may have produced a JSONL on disk that wasn't in our cached
+  // list yet. findResumableSession needs the current set to match.
+  await loadSessions();
 
   // (1) Resume saved sessions that belong to this project.
   const projectSessionIds = new Set(sessionIdsInProject(projectId));
@@ -184,10 +196,17 @@ export async function openProject(projectId: string): Promise<void> {
         createdAt: number;
       }>
     >(IPC.ListPendingChats, { projectId });
-    const alreadyOpenPendingIds = new Set(openChatsInProject(projectId).map((c) => c.id));
-    // sort by createdAt asc so the oldest pending claims the oldest match
+    const projectChats = openChatsInProject(projectId);
+    // Dedup by chat.id (the original pending was created with that id)
+    // AND by sessionId (a previous openProject pass may have promoted the
+    // pending into a real session-backed chat with a brand-new UUID).
+    const alreadyOpenPendingIds = new Set(projectChats.map((c) => c.id));
+    const alreadyOpenSessionIdsAfterResume = new Set(
+      projectChats.map((c) => c.sessionId).filter((s): s is string => Boolean(s)),
+    );
+    // Sort by createdAt asc so the oldest pending claims the oldest match.
     const pendingByAge = [...pending].sort((a, b) => a.createdAt - b.createdAt);
-    const claimedSessionIds = new Set<string>();
+    const claimedSessionIds = new Set<string>(alreadyOpenSessionIdsAfterResume);
     for (const p of pendingByAge) {
       if (alreadyOpenPendingIds.has(p.id)) continue;
       const match = findResumableSession(sessions(), p, claimedSessionIds);
@@ -203,12 +222,34 @@ export async function openProject(projectId: string): Promise<void> {
           },
           { projectId },
         );
+        // Promote the pending → permanent: drop the pending row and write
+        // a session→project map entry. Next openProject pass will see the
+        // session in `projectSessionIds` (already-resumed → skipped by the
+        // alreadyOpenSessionIds check) and the pending list will be empty
+        // for this row, eliminating the duplication path entirely.
+        try {
+          await invoke<undefined>(IPC.AssignSessionToProject, {
+            sessionId: match.sessionId,
+            projectId,
+          });
+          _setSessionMap((prev) => ({ ...prev, [match.sessionId]: projectId }));
+          await invoke<undefined>(IPC.RemovePendingChat, { id: p.id });
+        } catch (err) {
+          console.warn('[chat-projects] failed to promote pending → session:', err);
+        }
         continue;
       }
       // No on-disk match — fall back to a fresh re-spawn so the user at
       // least gets a placeholder tab back. They lose conversation history
       // but the workspace shape is preserved.
+      //
+      // CRITICAL: pass `id: p.id` so the restored chat reuses the pending
+      // row's id. Without this, every subsequent openProject pass would
+      // see no chat with id=p.id (the previous spawn used a fresh UUID),
+      // dedup misses, and a NEW fresh chat spawns. The user reported this
+      // as "switching projects keeps duplicating my chat".
       openFreshChat({
+        id: p.id,
         cwd: p.cwd,
         agentId: p.agentId,
         title: p.title,

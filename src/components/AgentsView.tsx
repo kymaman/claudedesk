@@ -3,7 +3,7 @@
  * Main-view for managing CLI agents and global terminal defaults.
  */
 
-import { For, Show, createSignal, createEffect } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { store, toggleSettingsDialog, setAutoTrustFolders } from '../store/store';
 import {
   terminalDefaults,
@@ -25,21 +25,19 @@ import { CustomAgentEditor } from './CustomAgentEditor';
 import './AgentsView.css';
 
 export function AgentsView() {
+  // Drafts seed from the persisted store on mount. They are NOT reset
+  // reactively when terminalDefaults() changes — that was the bug behind
+  // "I edit env vars and they keep snapping back". The save buttons below
+  // already write the parsed result to the store; if we re-derived the
+  // draft from the canonical (re-stringified) form on every save, the
+  // user's typing-in-progress would be clobbered with the cleaned-up
+  // version. Drafts are user-input state; they belong to the component.
   const [flagsDraft, setFlagsDraft] = createSignal(stringifyFlags(terminalDefaults().flags));
   const [envDraft, setEnvDraft] = createSignal(stringifyEnv(terminalDefaults().env));
   const [extraFoldersDraft, setExtraFoldersDraft] = createSignal(
     filterState().extraFolders.join('\n'),
   );
   const [savedFlash, setSavedFlash] = createSignal<string | null>(null);
-
-  // Reset drafts when stored value changes externally (e.g. load on mount)
-  createEffect(() => {
-    setFlagsDraft(stringifyFlags(terminalDefaults().flags));
-    setEnvDraft(stringifyEnv(terminalDefaults().env));
-  });
-  createEffect(() => {
-    setExtraFoldersDraft(filterState().extraFolders.join('\n'));
-  });
 
   function saveFlags() {
     setTerminalFlags(parseFlagsInput(flagsDraft()));

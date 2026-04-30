@@ -336,6 +336,13 @@ function App() {
     await loadState();
     await loadKeybindings();
 
+    // Restore open chats from the previous session — must run AFTER
+    // loadAgents() so resolveAgent has the agent defs loaded. Project
+    // chats restore separately via the projects panel; this only handles
+    // the unassigned (Chats tab) ones.
+    const { restoreOpenChats } = await import('./store/chats');
+    restoreOpenChats();
+
     // Restore plan content for tasks that had a plan file before restart
     for (const taskId of [...store.taskOrder, ...store.collapsedTaskOrder]) {
       const task = store.tasks[taskId];
@@ -789,9 +796,20 @@ function App() {
             >
               <SessionsHistoryPanel />
             </div>
-            <Show when={mainView() === 'projects'}>
+            {/* Projects stays mounted across mainView switches so its open
+                chat tiles (and their PTYs) survive a hop to History/Chats
+                and back. <Show> would unmount the whole panel, which kills
+                every TerminalView inside via onCleanup → KillAgent. */}
+            <div
+              style={{
+                flex: '1',
+                display: mainView() === 'projects' ? 'flex' : 'none',
+                'min-width': '0',
+                'min-height': '0',
+              }}
+            >
               <ProjectsPanel />
-            </Show>
+            </div>
             <Show when={mainView() === 'agents'}>
               <AgentsView />
             </Show>

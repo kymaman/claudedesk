@@ -9,7 +9,8 @@
  * project (replacing its previous assignment).
  */
 
-import { createSignal, createMemo, For, Show, onMount } from 'solid-js';
+import { createSignal, createMemo, createEffect, For, Show, onMount } from 'solid-js';
+import { mainView } from '../store/mainView';
 import {
   projects,
   activeProjectId,
@@ -22,7 +23,7 @@ import {
   persistPendingChat,
 } from '../store/chat-projects';
 import { sessions, loadSessions } from '../store/sessions-history';
-import { openChatsInProject, openFreshChat } from '../store/chats';
+import { openChats, openFreshChat } from '../store/chats';
 import { ChatsGrid } from './ChatsGrid';
 import { ProjectRow } from './ProjectRow';
 import { DragMime, dragHasMime } from '../lib/drag-mime';
@@ -41,6 +42,16 @@ export function ProjectsPanel() {
     if (sessions().length === 0) void loadSessions();
   });
 
+  // Re-fetch projects whenever the user navigates back to the Projects
+  // tab. Pre-fix the panel was rendered via <Show>, so navigating to it
+  // remounted and re-ran loadProjects(); we now keep it mounted via
+  // display:none, so the auto-refresh has to be reactive instead.
+  // Catches: another window / a CLI flow / a test creating a project via
+  // IPC and the rail picking it up on the next tab switch.
+  createEffect(() => {
+    if (mainView() === 'projects') void loadProjects();
+  });
+
   const active = createMemo(() => projects().find((p) => p.id === activeProjectId()) ?? null);
 
   const sessionsInActive = createMemo(() => {
@@ -55,12 +66,17 @@ export function ProjectsPanel() {
     return sessions().filter((s) => !map[s.sessionId]).length;
   });
 
-  /** Live chats whose projectId === active project. Re-evaluated reactively
-   *  so opening / closing chats updates the visible tile list immediately. */
-  const projectChats = createMemo(() => {
-    const a = active();
-    return a ? openChatsInProject(a.id) : [];
-  });
+  /** Every chat tagged with ANY project — kept mounted as a single pool so
+   *  switching the active project becomes a CSS visibility flip rather than
+   *  an unmount cascade that would kill PTYs. */
+  const allProjectChats = createMemo(() => openChats().filter((c) => c.projectId !== null));
+  /** Visibility filter passed to ChatsGrid: only the active project's tiles
+   *  show; the rest stay in the DOM with display:none, terminals alive. */
+  const isVisibleInActive = (c: { projectId: string | null }) => c.projectId === active()?.id;
+  /** Counter for the header — only chats actually visible right now. */
+  const visibleProjectChatCount = createMemo(
+    () => allProjectChats().filter(isVisibleInActive).length,
+  );
 
   function beginCreate() {
     setCreating(true);
@@ -189,7 +205,7 @@ export function ProjectsPanel() {
               <header class="projects-main__head">
                 <h2 class="projects-main__title">{p().name}</h2>
                 <span class="projects-main__count">
-                  {projectChats().length}/{sessionsInActive().length} chats
+                  {visibleProjectChatCount()}/{sessionsInActive().length} chats
                 </span>
                 <button
                   class="projects-rail__btn"
@@ -215,10 +231,11 @@ export function ProjectsPanel() {
                   ✕
                 </button>
               </header>
-              {/* Chats are filtered to only ones tagged with this project id —
-                  flipping projects here doesn't kill any chat anywhere. */}
+              {/* All project-tagged chats live in a single grid so the DOM
+                  tree never loses tiles on project switch; ChatsGrid hides
+                  non-active ones via display:none. PTYs stay alive. */}
               <div class="projects-main__grid">
-                <ChatsGrid chats={projectChats} />
+                <ChatsGrid chats={allProjectChats} visible={isVisibleInActive} />
               </div>
             </>
           )}

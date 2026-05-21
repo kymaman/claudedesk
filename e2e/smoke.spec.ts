@@ -53,7 +53,37 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (app) await app.close();
+  if (!app || !window) {
+    if (app) await app.close();
+    return;
+  }
+  // Clean up any test-created folders so they don't pollute the user's
+  // real folder list. Matches the prefixes used in this file plus a
+  // generic e2e-* catch-all.
+  try {
+    await window.evaluate(async () => {
+      interface Bridge {
+        ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> };
+      }
+      const b = (window as unknown as { electron?: Bridge }).electron;
+      if (!b) return;
+      const folders = (await b.ipcRenderer.invoke('list_folders')) as Array<{
+        id: string;
+        name: string;
+      }>;
+      // ONLY match folders the e2e suite itself creates — never delete a
+      // folder that could plausibly be a real user folder. The old regex
+      // included `/^test$/i` which nuked any real "Test" folder. Lesson
+      // learned the hard way: tests must own a clearly synthetic prefix.
+      const junk = folders.filter((f) => /^e2e-folder-\d+$|^rc-test-\d+$/i.test(f.name));
+      for (const f of junk) {
+        await b.ipcRenderer.invoke('delete_folder', { id: f.id });
+      }
+    });
+  } catch {
+    /* best effort — we're tearing down */
+  }
+  await app.close();
 });
 
 test('window loads and is titled', async () => {

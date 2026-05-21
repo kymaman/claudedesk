@@ -13,6 +13,11 @@ let rafId: number | undefined;
 let trailingTimer: number | undefined;
 let lastFlushTime = 0;
 const THROTTLE_MS = 150;
+/** When the container is reported invisible (clientWidth=0, parent
+ *  display:none) we keep the entry dirty and retry later. This is the
+ *  delay between retries — short enough that the user doesn't perceive
+ *  a flash of stale text when they switch back into the view. */
+const HIDDEN_RETRY_MS = 80;
 
 const resizeObserver = new ResizeObserver((resizeEntries) => {
   for (const re of resizeEntries) {
@@ -39,8 +44,19 @@ const intersectionObserver = new IntersectionObserver((ioEntries) => {
 
 function flush() {
   let didWork = false;
+  let deferredHidden = false;
   for (const [, entry] of entries) {
     if (!entry.dirty) continue;
+
+    // CRITICAL: if the container has zero width, fit() would compute
+    // cols=1 (or some tiny number) and lock the terminal in that state
+    // until the next ResizeObserver fire — which may never come if the
+    // parent toggles display:none synchronously. Keep dirty=true and
+    // retry shortly; xterm stays at its previous valid cols meanwhile.
+    if (entry.container.clientWidth <= 0 || entry.container.clientHeight <= 0) {
+      deferredHidden = true;
+      continue;
+    }
     entry.dirty = false;
 
     // xterm.js scroll position workaround (xtermjs/xterm.js#5096):
@@ -62,6 +78,20 @@ function flush() {
   // Only update throttle timestamp when we actually fitted something —
   // a no-op flush should not delay the next real fit.
   if (didWork) lastFlushTime = performance.now();
+
+  // Re-schedule for hidden tiles. They'll get measured the moment their
+  // parent stops being display:none.
+  if (deferredHidden) {
+    if (trailingTimer !== undefined) clearTimeout(trailingTimer);
+    trailingTimer = window.setTimeout(() => {
+      trailingTimer = undefined;
+      if (rafId !== undefined) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = undefined;
+        flush();
+      });
+    }, HIDDEN_RETRY_MS);
+  }
 }
 
 function scheduleFlush() {
@@ -96,6 +126,15 @@ export function registerTerminal(
   entries.set(id, { container, fitAddon, term, dirty: false });
   resizeObserver.observe(container);
   intersectionObserver.observe(container);
+  // Force a refit on every other terminal too — adding a tile to the
+  // grid changes everyone else's column count. Without this, the FIRST
+  // tile stays at its solo-mode wide cols while subsequent tiles get
+  // the narrower 2-col-grid size. Mark global dirty so the next flush
+  // touches them all.
+  for (const [otherId, otherEntry] of entries) {
+    if (otherId !== id) otherEntry.dirty = true;
+  }
+  scheduleFlush();
 }
 
 export function unregisterTerminal(id: string): void {
@@ -104,6 +143,9 @@ export function unregisterTerminal(id: string): void {
   resizeObserver.unobserve(entry.container);
   intersectionObserver.unobserve(entry.container);
   entries.delete(id);
+  // Removing a tile also changes the grid size for everyone else.
+  for (const otherEntry of entries.values()) otherEntry.dirty = true;
+  scheduleFlush();
 }
 
 export function markDirty(id: string): void {

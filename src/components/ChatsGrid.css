@@ -75,6 +75,39 @@
   min-height: 26px;
   /* draggable: the header is the drag handle for tile reordering */
   cursor: grab;
+  /* anchor the right-click menu to the head */
+  position: relative;
+}
+
+.chat-tile__menu {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 60;
+  margin-top: 2px;
+  min-width: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-tile__menu-item {
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-tile__menu-item:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
 .chat-tile__head:active {

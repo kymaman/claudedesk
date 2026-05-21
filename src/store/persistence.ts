@@ -91,6 +91,7 @@ export async function saveState(): Promise<void> {
       savedInitialPrompt: task.savedInitialPrompt,
       planFileName: task.planFileName,
       stepsEnabled: task.stepsEnabled,
+      claudeSessionId: task.claudeSessionId,
     };
   }
 
@@ -121,6 +122,7 @@ export async function saveState(): Promise<void> {
       savedInitialPrompt: task.savedInitialPrompt,
       planFileName: task.planFileName,
       stepsEnabled: task.stepsEnabled,
+      claudeSessionId: task.claudeSessionId,
       collapsed: true,
     };
   }
@@ -409,6 +411,7 @@ export async function loadState(): Promise<void> {
           savedInitialPrompt: pt.savedInitialPrompt,
           planFileName: pt.planFileName,
           stepsEnabled: pt.stepsEnabled,
+          claudeSessionId: pt.claudeSessionId,
         };
 
         s.tasks[taskId] = task;
@@ -478,6 +481,7 @@ export async function loadState(): Promise<void> {
           savedInitialPrompt: pt.savedInitialPrompt,
           planFileName: pt.planFileName,
           stepsEnabled: pt.stepsEnabled,
+          claudeSessionId: pt.claudeSessionId,
           collapsed: true,
           savedAgentDef: agentDef ?? undefined,
         };

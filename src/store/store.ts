@@ -46,6 +46,7 @@ export {
   hasDirectTask,
   collapseTask,
   uncollapseTask,
+  duplicateTask,
   getGitHubDropDefaults,
   setNewTaskDropUrl,
   setNewTaskPrefillPrompt,

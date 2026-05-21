@@ -11,6 +11,7 @@ import {
   clearPendingAction,
   showNotification,
   setTaskSplitMode,
+  duplicateTask,
 } from '../store/store';
 import { useFocusRegistration } from '../lib/focus-registration';
 import { ResizablePanel, type PanelChild } from './ResizablePanel';
@@ -368,6 +369,7 @@ export function TaskPanel(props: TaskPanelProps) {
           onClose={() => setShowCloseConfirm(true)}
           onMerge={() => setShowMergeConfirm(true)}
           onPush={() => setShowPushConfirm(true)}
+          onDuplicate={() => duplicateTask(props.task.id)}
           pushing={pushing()}
           pushSuccess={pushSuccess()}
           onTitleEditRef={(h) => (titleEditHandle = h)}

@@ -264,11 +264,15 @@ test('Projects → History → Projects keeps panel mounted (no PTY kill)', asyn
   await win.locator('.ts-nav', { hasText: 'Projects' }).click();
   await win.waitForTimeout(400);
 
-  const same = await win.evaluate(
-    (h) => h === document.querySelector('.projects-main__grid .chat-tile .xterm'),
-    handleBefore,
-  );
-  expect(same).toBe(true);
+  // The captured node must still be attached to the live DOM. We check
+  // `isConnected` rather than re-querying `.first()` — when a prior test
+  // leaves a display:none orphan tile that sorts ahead in the DOM,
+  // document.querySelector(...) returns THAT node, not the active chat's,
+  // giving a false negative even though our captured node never moved.
+  // isConnected is the precise question: was this exact node remounted?
+  // (a remount = PTY kill = the bug we're guarding against.)
+  const stillConnected = await win.evaluate((h) => (h as Element).isConnected, handleBefore);
+  expect(stillConnected).toBe(true);
 });
 
 // ---------------------------------------------------------------------------

@@ -877,6 +877,16 @@ function SessionRow(props: {
       </div>
       <Show when={menuOpen()}>
         <div class="session-item__menu" onClick={(e) => e.stopPropagation()}>
+          <button
+            class="session-item__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              startEdit();
+            }}
+          >
+            Rename
+          </button>
           <button class="session-item__menu-item" onClick={handleHideFromView}>
             Delete from view
           </button>

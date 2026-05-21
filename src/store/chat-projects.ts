@@ -261,6 +261,20 @@ export async function openProject(projectId: string): Promise<void> {
   } catch (err) {
     console.warn('[chat-projects] failed to restore pending chats:', err);
   }
+
+  // No empty-project auto-spawn: a previous version of this function
+  // created a fresh chat whenever the project had zero open chats so
+  // the user "always lands on a usable terminal" — but that fired on
+  // EVERY click of the project row (openProject is the row's onClick
+  // handler). The user would click a row, get an auto-spawned tile,
+  // then click "+ new chat" and end up with TWO tiles instead of one.
+  // Tests at projects.spec.ts (Switching keeps in DOM / clicking twice /
+  // open all idempotent) and ui-clipboard-and-drag (Project + new chat
+  // persisted-pending) all caught this as a tile-duplication regression.
+  // The correct UX is: empty project shows the empty-state hint; the
+  // user clicks "+ new chat" explicitly when they want a chat. The empty
+  // hint already exists inside ChatsGrid for the `visibleCount === 0`
+  // case, so there's no UI gap to paper over.
 }
 
 /**

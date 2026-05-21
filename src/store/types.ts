@@ -69,6 +69,11 @@ export interface Task {
   stepsEnabled?: boolean;
   stepsContent?: StepEntry[];
   lastInputAt?: string;
+  /** Pre-determined Claude Code session UUID (passed via --session-id on
+   *  first spawn). Lets us resume the same conversation after the app is
+   *  restarted by switching the spawn args to --resume. Only set when the
+   *  task's agent is a Claude Code variant. */
+  claudeSessionId?: string;
 }
 
 export interface Terminal {
@@ -100,6 +105,7 @@ export interface PersistedTask {
   collapsed?: boolean;
   planFileName?: string;
   stepsEnabled?: boolean;
+  claudeSessionId?: string;
 }
 
 export interface PersistedTerminal {

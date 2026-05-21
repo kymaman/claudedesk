@@ -77,12 +77,20 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
   // True while another tile is being dragged over this one — drives the
   // drop-target ring so the user can see exactly where the drop will land.
   const [isDropTarget, setIsDropTarget] = createSignal(false);
+  // Right-click context menu on the tile head → Rename / Close.
+  const [menuOpen, setMenuOpen] = createSignal(false);
 
   function onRename(e: MouseEvent) {
     e.stopPropagation();
     const current = props.chat.title;
     const next = window.prompt('Rename chat', current);
     if (next && next.trim() && next !== current) renameChat(props.chat.id, next.trim());
+  }
+
+  function onHeadContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(true);
   }
 
   // Drag a tile by its header to reorder. We don't use draggable on the
@@ -143,7 +151,8 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
         class="chat-tile__head"
         draggable={true}
         onDragStart={onHeadDragStart}
-        title="Drag to reorder · double-click title to rename"
+        onContextMenu={onHeadContextMenu}
+        title="Drag to reorder · double-click title to rename · right-click for menu"
       >
         <span class="chat-tile__title" title={props.chat.cwd} onDblClick={onRename}>
           {props.chat.title}
@@ -159,6 +168,38 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
         >
           ×
         </button>
+        <Show when={menuOpen()}>
+          <div class="chat-tile__menu" onClick={(e) => e.stopPropagation()}>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                setMenuOpen(false);
+                onRename(e);
+              }}
+            >
+              Rename
+            </button>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                closeChat(props.chat.id);
+              }}
+            >
+              Close
+            </button>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </Show>
       </div>
       <div class="chat-tile__body" ref={bodyRef}>
         <TerminalView

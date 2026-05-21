@@ -212,6 +212,19 @@ export function TaskAITerminal(props: TaskAITerminalProps) {
                     }
                     command={a().def.command}
                     args={[
+                      // Claude Code session-id injection: on the very first
+                      // spawn we pass --session-id <uuid> so claude writes
+                      // the JSONL under that exact id. On every subsequent
+                      // spawn (after collapse, app restart, etc.) we swap to
+                      // --resume <uuid> so the same conversation continues.
+                      // Tasks created before this fix have no claudeSessionId
+                      // — they fall through to the legacy fresh/resume_args
+                      // logic below.
+                      ...(props.task.claudeSessionId
+                        ? a().resumed
+                          ? ['--resume', props.task.claudeSessionId]
+                          : ['--session-id', props.task.claudeSessionId]
+                        : []),
                       ...(a().resumed && a().def.resume_args?.length
                         ? (a().def.resume_args ?? [])
                         : a().def.args),

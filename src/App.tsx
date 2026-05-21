@@ -813,7 +813,18 @@ function App() {
             <Show when={mainView() === 'agents'}>
               <AgentsView />
             </Show>
-            <Show when={mainView() === 'branches'}>
+            {/* Branches stays mounted across mainView switches — same reason
+                as Projects above. <Show> would unmount <TilingLayout> and every
+                task's TerminalView, killing the PTYs via onCleanup. Display-toggle
+                keeps PTYs alive on tab hop. */}
+            <div
+              style={{
+                flex: '1',
+                display: mainView() === 'branches' ? 'flex' : 'none',
+                'min-width': '0',
+                'min-height': '0',
+              }}
+            >
               <Show when={store.sidebarVisible}>
                 <Sidebar />
               </Show>
@@ -848,7 +859,7 @@ function App() {
                 </button>
               </Show>
               <TilingLayout />
-            </Show>
+            </div>
             <Show when={assistantOpen()}>
               <AssistantSidebar />
             </Show>

@@ -328,6 +328,12 @@ export function TerminalView(props: TerminalViewProps) {
             // batch.
             try {
               term?.paste(text);
+              // term.paste() does NOT fire a focus event, so xterm's internal
+              // _isFocused flag stays false if the user had switched windows /
+              // tabs between focus and paste. Without this, after paste the
+              // user can't press Enter or type anything until they click the
+              // terminal again. Explicit focus() restores the flag.
+              term?.focus();
             } catch {
               // term may have been disposed mid-keypress; fall back to raw
               // enqueue so the user's input isn't silently dropped.
@@ -385,6 +391,10 @@ export function TerminalView(props: TerminalViewProps) {
         if (text.length === 0) return;
         try {
           term?.paste(text);
+          // Same focus-restore as the Ctrl+V keyboard path — without it,
+          // pasting via the right-click menu leaves the terminal unable
+          // to receive Enter/keystrokes until the user clicks back on it.
+          term?.focus();
         } catch {
           /* term may be disposed */
         }
@@ -401,6 +411,137 @@ export function TerminalView(props: TerminalViewProps) {
         }
       },
     });
+
+    // ------------------------------------------------------------
+    // Whisper Flow / external text injection safety net
+    // ------------------------------------------------------------
+    // xterm only sees text that arrives via real keydown events on its
+    // hidden helper-textarea. Whisper Flow (and similar dictation tools)
+    // injects text by setting `textarea.value` programmatically — that
+    // path doesn't fire keydown, so xterm ignores it and the dictated
+    // text disappears entirely. Telegram and notes apps accept it
+    // because they read `value` directly.
+    //
+    // Defensive fix: listen for `input` events (capture=false so xterm
+    // runs first) AND poll the textarea value periodically. If after
+    // xterm's own handling the textarea still contains text, treat it
+    // as an external injection and forward to the PTY.
+    const taEl = containerRef.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    // xterm hides the helper-textarea off-screen (left:-9999px) so
+    // dictation tools (Wispr Flow, Dragon, etc.) can't detect it as a
+    // focusable input. Their accessibility-tree scanner skips elements
+    // positioned outside the viewport.
+    //
+    // To let Wispr Flow target it we park the textarea on-screen with a
+    // 1×1 px / zero-opacity footprint so it's a "real" focused input in
+    // the a11y tree. BUT: with N chat tiles open there are N helper
+    // textareas. If they were ALL a11y-visible, Wispr Flow's scanner
+    // sees N identical "Terminal input" textboxes and writes to an
+    // arbitrary one — which is exactly the user's bug ("only the Ask
+    // sidebar works; Ask has just one terminal"). And "sometimes it
+    // registers, sometimes not" is the same ambiguity racing focus.
+    //
+    // Fix: expose EXACTLY ONE textarea to the a11y tree at a time — the
+    // focused chat's. Every other tile's textarea is shoved back off
+    // screen and aria-hidden so Wispr Flow has a single unambiguous
+    // target that always maps to the chat the user is looking at.
+    if (taEl) {
+      taEl.setAttribute('aria-label', 'Terminal input');
+      taEl.setAttribute('aria-multiline', 'true');
+      taEl.setAttribute('role', 'textbox');
+    }
+    const exposeTextareaToA11y = (expose: boolean) => {
+      if (!taEl) return;
+      if (expose) {
+        taEl.style.position = 'absolute';
+        taEl.style.left = '0';
+        taEl.style.top = '0';
+        taEl.style.width = '1px';
+        taEl.style.height = '1px';
+        taEl.style.opacity = '0';
+        taEl.style.pointerEvents = 'none';
+        taEl.removeAttribute('aria-hidden');
+        taEl.tabIndex = 0;
+      } else {
+        // Back to xterm's default off-screen parking + hidden from the
+        // a11y tree, so dictation tools never resolve to this terminal.
+        taEl.style.left = '-9999px';
+        taEl.style.top = '0';
+        taEl.style.width = '1px';
+        taEl.style.height = '1px';
+        taEl.setAttribute('aria-hidden', 'true');
+        taEl.tabIndex = -1;
+      }
+    };
+    // Exposure rule: expose unless this terminal is EXPLICITLY a
+    // non-active chat tile (isFocused === false). `undefined` means the
+    // caller opted out of focus tracking entirely — that's the Ask
+    // sidebar, which is a lone terminal and must stay a11y-visible
+    // (Wispr Flow already works there; do not regress it). `true` is the
+    // active chat tile. Only `false` (a background chat tile) is hidden.
+    const shouldExpose = () => props.isFocused !== false;
+    exposeTextareaToA11y(shouldExpose());
+    createEffect(() => {
+      exposeTextareaToA11y(shouldExpose());
+    });
+    const whisperFlushInterval: number | undefined = taEl
+      ? // eslint-disable-next-line solid/reactivity -- poll callback reads current props.isFocused intentionally; not a tracked scope by design
+        window.setInterval(() => {
+          if (!taEl.value) return;
+          // Only the active chat (or a lone Ask terminal, isFocused
+          // undefined) may forward externally-injected text — a
+          // background tile must never swallow dictation meant for the
+          // active one (defence-in-depth on top of the a11y gating).
+          if (props.isFocused === false) {
+            taEl.value = '';
+            return;
+          }
+          // After xterm's keydown handler runs, value is normally
+          // cleared synchronously. A persistent non-empty value (200ms
+          // sample) means something else wrote it — Whisper, AHK,
+          // SendInput unicode mode, Wispr, etc.
+          const text = taEl.value;
+          taEl.value = '';
+          enqueueInput(text);
+        }, 200)
+      : undefined;
+    if (taEl) {
+      taEl.addEventListener(
+        'input',
+        () => {
+          // Defer one microtask so xterm's input handler (which clears
+          // the textarea) runs first. If it does NOT clear, this is
+          // external paste — forward. Only the focused chat forwards so
+          // dictation never lands in a background terminal.
+          // eslint-disable-next-line solid/reactivity -- microtask reads current props.isFocused intentionally; not a tracked scope by design
+          queueMicrotask(() => {
+            if (props.isFocused === false) {
+              taEl.value = '';
+              return;
+            }
+            if (taEl.value && taEl.value.length > 0) {
+              const text = taEl.value;
+              taEl.value = '';
+              enqueueInput(text);
+            }
+          });
+        },
+        false,
+      );
+      taEl.addEventListener(
+        'paste',
+        (e: Event) => {
+          if (props.isFocused === false) return;
+          const ce = e as ClipboardEvent;
+          const text = ce.clipboardData?.getData('text/plain') ?? '';
+          if (text.length === 0) return;
+          // Some external tools dispatch paste but don't actually fill
+          // the clipboard the way xterm expects. Forward explicitly.
+          enqueueInput(text);
+        },
+        false,
+      );
+    }
 
     // Mount-time sizing race: Solid places the element in the DOM, but the
     // browser may not have settled the layout pass when onMount() runs — so
@@ -760,6 +901,7 @@ export function TerminalView(props: TerminalViewProps) {
       if (inputFlushTimer !== undefined) clearTimeout(inputFlushTimer);
       if (resizeFlushTimer !== undefined) clearTimeout(resizeFlushTimer);
       if (outputRaf !== undefined) cancelAnimationFrame(outputRaf);
+      if (whisperFlushInterval !== undefined) clearInterval(whisperFlushInterval);
       onOutput.cleanup?.();
       offBridge();
       webglAddon?.dispose();

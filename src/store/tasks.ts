@@ -168,6 +168,16 @@ export async function createTask(opts: CreateTaskOptions): Promise<string> {
   const effectivePrompt =
     stepsEnabled && initialPrompt ? `${initialPrompt}\n\n---\n${STEPS_INSTRUCTION}` : initialPrompt;
 
+  // Pre-determine the Claude Code session UUID for claude-family agents.
+  // Passing --session-id on first spawn forces claude to write the JSONL
+  // under this exact id; on app restart we swap to --resume <sid> and
+  // pick up the same conversation. Non-claude agents (plain shells, custom
+  // tools) get no session id — restoration falls back to the legacy
+  // "fresh respawn" behaviour for them.
+  const isClaudeAgent =
+    agentDef?.id?.startsWith('claude') === true || /\bclaude\b/.test(agentDef?.command ?? '');
+  const claudeSessionId = isClaudeAgent ? crypto.randomUUID() : undefined;
+
   const task: Task = {
     id: taskId,
     name,
@@ -188,6 +198,7 @@ export async function createTask(opts: CreateTaskOptions): Promise<string> {
     dockerSource: dockerSource ?? undefined,
     dockerImage: dockerImage ?? undefined,
     githubUrl,
+    claudeSessionId,
   };
 
   const agent: Agent = {
@@ -205,6 +216,94 @@ export async function createTask(opts: CreateTaskOptions): Promise<string> {
   initTaskInStore(taskId, task, agent, projectId, agentDef);
   saveState(); // fire-and-forget — errors handled internally
   return taskId;
+}
+
+/**
+ * Forks an existing task into a parallel dialog. The duplicate gets a
+ * brand-new task id + agent id but keeps the original's worktree, name
+ * (with " (copy)"), notes, and agentDef. We pass `--resume <originalSid>
+ * --fork-session` to the new spawn so claude continues the conversation
+ * up to this point and then branches off into a fresh session id. The
+ * duplicated task starts WITHOUT a tracked claudeSessionId — claude will
+ * mint a new one inside its JSONL. Re-resuming the duplicate after an
+ * app restart is a known limitation; the user can pick from /resume by
+ * hand if they want to recover that branch.
+ */
+export function duplicateTask(taskId: string): string | null {
+  const original = store.tasks[taskId];
+  if (!original) return null;
+  if (!original.claudeSessionId) {
+    // Pre-fix tasks have no session id to fork from. Bail rather than
+    // silently spawning a fresh-but-context-less task.
+    console.warn(
+      '[duplicateTask] task has no claudeSessionId — duplicate would lose context, skipping',
+    );
+    return null;
+  }
+  const firstAgent = original.agentIds[0] ? store.agents[original.agentIds[0]] : null;
+  const agentDef = firstAgent?.def ?? original.savedAgentDef;
+  if (!agentDef) {
+    console.warn('[duplicateTask] cannot find agentDef on original task');
+    return null;
+  }
+
+  const newTaskId = crypto.randomUUID();
+  const newAgentId = crypto.randomUUID();
+
+  // Stamp `_resumeFromSid` on the cloned task via the existing
+  // claudeSessionId field BUT also flag agent.resumed=true so the
+  // session-prefix logic in TaskAITerminal emits `--resume` instead of
+  // `--session-id`. Use the ORIGINAL sid so claude branches off from it.
+  // After the first spawn, `--fork-session` will create a new session id
+  // claude-side; we don't track it (limitation noted above).
+  const newTask: Task = {
+    ...original,
+    id: newTaskId,
+    name: `${original.name} (copy)`,
+    agentIds: [newAgentId],
+    shellAgentIds: [],
+    claudeSessionId: original.claudeSessionId,
+    initialPrompt: undefined,
+    savedInitialPrompt: undefined,
+    prefillPrompt: undefined,
+    closingStatus: undefined,
+    closingError: undefined,
+    collapsed: undefined,
+    savedAgentDef: undefined,
+    lastInputAt: undefined,
+  };
+
+  const newAgent: Agent = {
+    id: newAgentId,
+    taskId: newTaskId,
+    def: {
+      ...agentDef,
+      // Ensure --fork-session is part of args on the very first spawn
+      // so claude branches from the original sid instead of trying to
+      // attach to it in parallel (which it does not support).
+      args: [...(agentDef.args ?? []), '--fork-session'],
+    },
+    resumed: true,
+    status: 'running',
+    exitCode: null,
+    signal: null,
+    lastOutput: [],
+    generation: 0,
+  };
+
+  setStore(
+    produce((s) => {
+      s.tasks[newTaskId] = newTask;
+      s.agents[newAgentId] = newAgent;
+      s.taskOrder.push(newTaskId);
+      s.activeTaskId = newTaskId;
+      s.activeAgentId = newAgentId;
+    }),
+  );
+  markAgentSpawned(newAgentId);
+  rescheduleTaskStatusPolling();
+  saveState();
+  return newTaskId;
 }
 
 export interface CreateImportedTaskOptions {

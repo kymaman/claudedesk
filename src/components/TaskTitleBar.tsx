@@ -23,6 +23,11 @@ interface TaskTitleBarProps {
   onClose: () => void;
   onMerge: () => void;
   onPush: () => void;
+  /** Forks the current task into a parallel dialog: same worktree,
+   *  same conversation up to this point, but a new claude session id
+   *  so the two can diverge from here. Implementation: clones the Task,
+   *  spawns the new agent with --resume <originalSid> --fork-session. */
+  onDuplicate: () => void;
   pushing: boolean;
   pushSuccess: boolean;
   onTitleEditRef: (h: EditableTextHandle) => void;
@@ -97,6 +102,17 @@ export function TaskTitleBar(props: TaskTitleBarProps) {
             onClick={() => props.onMerge()}
             title="Merge into main"
           />
+          <Show when={props.task.claudeSessionId}>
+            <IconButton
+              icon={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2 2h6v2H4v8h8V8h2v6H2V2Zm9 0h3v3h-1V3.5L9.5 7 9 6.5 12.5 3H11V2Z" />
+                </svg>
+              }
+              onClick={() => props.onDuplicate()}
+              title="Duplicate dialog (fork conversation into a parallel task)"
+            />
+          </Show>
           <div style={{ position: 'relative', display: 'inline-flex' }}>
             <Show
               when={!props.pushing}

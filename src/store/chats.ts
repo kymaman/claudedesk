@@ -9,7 +9,7 @@
  * parallel; closing one never affects the others or any Branches task.
  */
 
-import { createRoot, createEffect, createSignal, type Accessor, type Setter } from 'solid-js';
+import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { store } from './core';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
@@ -147,7 +147,7 @@ export function setActiveChatId(id: string | null): void {
   if (id !== null) {
     _lastActiveAtById.set(id, Date.now());
     _setActivityTick((n) => n + 1);
-    persistOpenChats();
+    schedulePersistOpenChats();
   }
 }
 
@@ -217,6 +217,7 @@ function buildChat(params: {
   _setChats((prev) => [...prev, chat]);
   _lastActiveAtById.set(chat.id, now);
   _setActiveChatId(chat.id);
+  schedulePersistOpenChats();
   return chat;
 }
 
@@ -316,6 +317,7 @@ export function openFreshChat(params: {
  */
 export function setChatProject(chatId: string, projectId: string | null): void {
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, projectId } : c)));
+  schedulePersistOpenChats();
 }
 
 /** Reorder a chat — moves it to `targetIndex` in the openChats list. */
@@ -329,6 +331,7 @@ export function reorderChat(chatId: string, targetIndex: number): void {
     next.splice(clamped, 0, item);
     return next;
   });
+  schedulePersistOpenChats();
 }
 
 /** All open chats that belong to a particular project (or null = unassigned). */
@@ -346,6 +349,7 @@ export function closeChat(chatId: string): void {
     void invoke<undefined>(IPC.RemovePendingChat, { id: chatId }).catch(() => undefined);
   }
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, closed: true } : c)));
+  schedulePersistOpenChats();
   // Prune closed chats after a tick so TerminalView has a chance to run its cleanup.
   setTimeout(() => {
     _setChats((prev) => prev.filter((c) => !c.closed || c.id !== chatId));
@@ -354,6 +358,7 @@ export function closeChat(chatId: string): void {
     if (_activeChatId() === chatId) {
       _setActiveChatId(remaining[remaining.length - 1]?.id ?? null);
     }
+    schedulePersistOpenChats();
   }, 50);
 }
 
@@ -420,6 +425,7 @@ export function branchChat(chatId: string): Chat | null {
   });
   _lastActiveAtById.set(branched.id, now);
   _setActiveChatId(branched.id);
+  schedulePersistOpenChats();
   return branched;
 }
 
@@ -469,6 +475,7 @@ export function renameChat(chatId: string, title: string): void {
   // toggle (don't remount on hidden), so any churn from this map
   // doesn't kill PTYs.
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
+  schedulePersistOpenChats();
 }
 
 // ---------------------------------------------------------------------------
@@ -530,13 +537,32 @@ function persistOpenChats(): void {
   }
 }
 
-// One-shot effect attached at module init so we don't accumulate effects.
-createRoot(() => {
-  createEffect(() => {
-    void _chats();
+// Debounce localStorage writes — bursts of rename/recency/close updates
+// don't need a separate JSON.stringify pass each. 500ms trailing edge is
+// well below "how fast a user clicks something else and quits the app",
+// so we never lose a meaningful change on shutdown.
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePersistOpenChats(): void {
+  if (_persistTimer !== null) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
     persistOpenChats();
-  });
-});
+  }, 500);
+}
+
+// Visible to tests so they can assert the debounce window — and to App.tsx
+// `beforeunload` flush so a quick quit doesn't drop the last change.
+export function flushPersistOpenChatsForTest(): void {
+  if (_persistTimer !== null) {
+    clearTimeout(_persistTimer);
+    _persistTimer = null;
+  }
+  persistOpenChats();
+}
+
+// Mutation sites call schedulePersistOpenChats() directly. A previous
+// createEffect-based auto-persist was unreliable in Node test envs and
+// duplicated the bookkeeping each mutation already does.
 
 /**
  * Restore non-project chats persisted from the previous session. Called

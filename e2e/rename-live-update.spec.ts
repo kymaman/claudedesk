@@ -122,9 +122,15 @@ test('history session row updates title immediately after rename', async () => {
   const before = (await titleEl.textContent())?.trim() ?? '';
   expect(before.length).toBeGreaterThan(0);
 
-  // Double-click the title row to start inline edit (the path that
-  // doesn't go through prompt() — it shows an inline input).
-  await row.dblclick();
+  // Inline rename is now reached via right-click → Rename (the old
+  // double-click entry point was removed because single-click vs
+  // double-click on the same row was ambiguous — single click opens
+  // the chat, dblclick was getting swallowed).
+  await row.click({ button: 'right' });
+  const menu = row.locator('.session-item__menu');
+  await expect(menu).toBeVisible({ timeout: 3_000 });
+  await menu.locator('button', { hasText: /^rename$/i }).click();
+
   const input = row.locator('.session-item__title-input');
   await expect(input).toBeVisible({ timeout: 3_000 });
 

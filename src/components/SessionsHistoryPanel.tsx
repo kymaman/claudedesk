@@ -53,7 +53,7 @@ import {
   saveLaunchSettings,
   type LaunchSettings,
 } from '../store/launch-settings';
-import { openChatFromSession, openChats } from '../store/chats';
+import { openChatFromSession, openChats, branchChatFromSession } from '../store/chats';
 import { sessionProjectMap } from '../store/chat-projects';
 import { ChatsGrid } from './ChatsGrid';
 import { openChatsInProject } from '../store/chats';
@@ -790,12 +790,8 @@ function SessionRow(props: {
         }
         void handleResume(e);
       }}
-      onDblClick={(e) => {
-        e.stopPropagation();
-        startEdit();
-      }}
       onContextMenu={handleContextMenu}
-      title="Click to resume · double-click to rename · right-click for delete menu"
+      title="Click to resume · right-click to rename / delete"
     >
       <div class="session-item__title-row">
         <Show
@@ -886,6 +882,33 @@ function SessionRow(props: {
             }}
           >
             Rename
+          </button>
+          <button
+            class="session-item__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              void invoke<string>(IPC.OpenPath, {
+                filePath: props.session.projectPath,
+              }).catch((err) => {
+                console.warn('[session-row] OpenPath failed:', err);
+              });
+            }}
+            title={props.session.projectPath}
+          >
+            Open folder
+          </button>
+          <button
+            class="session-item__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              const projectId = sessionProjectMap()[props.session.sessionId] ?? null;
+              branchChatFromSession(props.session, settings(), { projectId });
+            }}
+            title="Open a parallel copy sharing context (claude --fork-session)"
+          >
+            Branch
           </button>
           <button class="session-item__menu-item" onClick={handleHideFromView}>
             Delete from view

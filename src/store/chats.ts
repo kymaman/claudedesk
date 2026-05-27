@@ -76,8 +76,61 @@ const [_activeChatId, _setActiveChatId] = createRoot<RootSig<string | null>>(() 
  */
 const _lastActiveAtById = new Map<string, number>();
 
+/**
+ * Reactive "something became active" tick. The `_lastActiveAtById` Map is
+ * intentionally non-reactive (it keeps chat object refs stable so <For>
+ * doesn't remount terminals). But the chip strip wants to re-sort
+ * most-recently-used to the front whenever a chat is activated — that
+ * needs a reactive trigger. Bumping this signal on every activation lets
+ * `chipChats()` re-run without touching chat object identity.
+ */
+const [_activityTick, _setActivityTick] = createRoot<RootSig<number>>(() => createSignal(0));
+
+/**
+ * Per-chat title overrides + reactive tick. Renames went through
+ * `_setChats(prev.map(...))` which creates a new chat object — but in
+ * practice Solid's `<For>` was NOT picking up the new title on render
+ * (confirmed by an e2e: title text in the DOM stayed at the old value
+ * even after the rename committed). Suspect: the chat ref change
+ * collapsed back to in-place reuse somewhere up the chain. Cause is
+ * worth a follow-up but the user-visible fix is what matters now.
+ *
+ * Workaround: store the latest title in a side Map and have every
+ * surface (chip, tile head, history row's chat copy) read through
+ * `titleFor(chat)`. The Map is paired with `_titleTick` so reading
+ * subscribes to renames reactively.
+ */
+const _titleOverrides = new Map<string, string>();
+const [_titleTick, _setTitleTick] = createRoot<RootSig<number>>(() => createSignal(0));
+
 export const chats = _chats;
 export const activeChatId = _activeChatId;
+
+/**
+ * Returns the latest title for a chat. Reactive: subscribers re-run
+ * when `renameChat` bumps `_titleTick`. Use this everywhere the title
+ * is rendered — `chat.title` directly is a stale read.
+ */
+export function titleFor(chat: Pick<Chat, 'id' | 'title'>): string {
+  _titleTick();
+  return _titleOverrides.get(chat.id) ?? chat.title;
+}
+
+/**
+ * Lightweight test/debug hook so Playwright e2e (and DevTools manual
+ * pokes) can reach the store without going through the UI. The
+ * surface is intentionally tiny and read/write-symmetric; it's not
+ * documented as a public API.
+ */
+if (typeof window !== 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__claudedeskChats = {
+    chats: () => _chats(),
+    renameChat: (id: string, title: string) => renameChat(id, title),
+    titleFor: (chat: Pick<Chat, 'id' | 'title'>) => titleFor(chat),
+    branchChat: (id: string) => branchChat(id),
+  };
+}
 
 /** Read the freshest lastActiveAt for a chat — Map first, then the
  *  chat's own field (which is the value set at construction time). */
@@ -93,8 +146,24 @@ export function setActiveChatId(id: string | null): void {
   _setActiveChatId(id);
   if (id !== null) {
     _lastActiveAtById.set(id, Date.now());
+    _setActivityTick((n) => n + 1);
     persistOpenChats();
   }
+}
+
+/**
+ * Open chats for the chip strip, sorted most-recently-used first. Reading
+ * `_activityTick` makes this reactive: activating a chat bumps it to the
+ * front of the tab strip ("последние диалоги поднимаются вверх"). Returns
+ * a fresh array — never mutates `_chats`, so terminal object refs and
+ * their live PTYs are untouched. Chips don't host xterm, so reordering
+ * the chip DOM is free; the grid tiles keep their own (insertion) order.
+ */
+export function chipChats(projectId: string | null): Chat[] {
+  void _activityTick();
+  return openChatsInProject(projectId)
+    .slice()
+    .sort((a, b) => lastActiveAtFor(b) - lastActiveAtFor(a));
 }
 
 export function openChats(): Chat[] {
@@ -288,7 +357,117 @@ export function closeChat(chatId: string): void {
   }, 50);
 }
 
+/**
+ * Branch an open chat: spawn a sibling tile that runs the SAME claude
+ * session with `--fork-session`, so they share context up to the moment
+ * of the fork and diverge afterwards into their own JSONLs. The new
+ * tile is inserted directly after the original in `_chats`, gets a
+ * "<orig> • branch" title, and becomes active.
+ *
+ * Requires the source chat to have a sessionId (otherwise there's no
+ * conversation to fork — returns null and logs).
+ */
+export function branchChat(chatId: string): Chat | null {
+  const src = _chats().find((c) => c.id === chatId && !c.closed);
+  if (!src) {
+    console.warn('[branchChat] source chat not found:', chatId);
+    return null;
+  }
+  if (!src.sessionId) {
+    console.warn('[branchChat] source chat has no sessionId — nothing to fork');
+    return null;
+  }
+  const baseAgent = resolveAgent(src.agentDefId);
+  if (!baseAgent) {
+    console.error('[branchChat] no agent for', src.agentDefId);
+    return null;
+  }
+
+  const args = [
+    '--resume',
+    src.sessionId,
+    '--fork-session',
+    ...(src.settings.skipPermissions ? baseAgent.skip_permissions_args : []),
+    ...src.settings.extraFlags,
+  ];
+
+  const now = Date.now();
+  const baseTitle = _titleOverrides.get(src.id) ?? src.title;
+  const branched: Chat = {
+    id: crypto.randomUUID(),
+    sessionId: src.sessionId,
+    title: `${baseTitle} • branch`,
+    cwd: src.cwd,
+    agentDefId: baseAgent.id,
+    command: baseAgent.command,
+    args,
+    env: {},
+    settings: { ...src.settings },
+    projectId: src.projectId,
+    createdAt: now,
+    lastActiveAt: now,
+    closed: false,
+  };
+
+  // Insert right after the source so the two tiles sit side-by-side in
+  // the grid — easier to compare than appending to the end.
+  _setChats((prev) => {
+    const idx = prev.findIndex((c) => c.id === src.id);
+    if (idx < 0) return [...prev, branched];
+    const next = prev.slice();
+    next.splice(idx + 1, 0, branched);
+    return next;
+  });
+  _lastActiveAtById.set(branched.id, now);
+  _setActiveChatId(branched.id);
+  return branched;
+}
+
+/**
+ * Branch directly from a History session — same semantics as branchChat
+ * but the source isn't required to be an already-open tile. Bypasses
+ * the openChatFromSession dedup (the whole point of a branch is to get
+ * a SECOND tile sharing context).
+ */
+export function branchChatFromSession(
+  session: SessionItem,
+  settings: ChatLaunchSettings,
+  options: { projectId?: string | null } = {},
+): Chat | null {
+  const baseAgent = resolveAgent(settings.agentId);
+  if (!baseAgent) {
+    console.error('[branchChatFromSession] no agent for', settings.agentId);
+    return null;
+  }
+  const args = [
+    '--resume',
+    session.sessionId,
+    '--fork-session',
+    ...(settings.skipPermissions ? baseAgent.skip_permissions_args : []),
+    ...settings.extraFlags,
+  ];
+  return buildChat({
+    id: crypto.randomUUID(),
+    sessionId: session.sessionId,
+    title: `${session.title || session.sessionId.slice(0, 8)} • branch`,
+    cwd: session.projectPath,
+    baseAgent,
+    args,
+    settings,
+    projectId: options.projectId ?? null,
+  });
+}
+
 export function renameChat(chatId: string, title: string): void {
+  // Update the side override Map + tick so subscribers (chip strip,
+  // tile head) re-render immediately via titleFor().
+  _titleOverrides.set(chatId, title);
+  _setTitleTick((n) => n + 1);
+  // Also write the new title onto the chat object in the array so
+  // persistence and any non-titleFor readers eventually see it. The
+  // chat ref change here is allowed — chat tiles already display-
+  // toggle (don't remount on hidden), so any churn from this map
+  // doesn't kill PTYs.
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
 }
 

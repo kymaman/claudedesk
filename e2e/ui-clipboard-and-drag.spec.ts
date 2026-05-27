@@ -77,11 +77,15 @@ test('right-click Paste on the History search input inserts clipboard text', asy
 });
 
 // ---------------------------------------------------------------------------
-// TopSwitcher chips: drag-rearrange
+// TopSwitcher chips: most-recently-used ordering
 // ---------------------------------------------------------------------------
+// NOTE: chip drag-reorder was removed — chips are now sorted by recency
+// (chipChats()), so a manual drag fought the sort and only reordered the
+// invisible underlying list. Recency ordering is pinned in detail by
+// e2e/chip-rename-and-recency.spec.ts; here we just sanity-check that
+// activating a chip changes the strip order.
 
-test('TopSwitcher chip drag dispatches a chat-id reorder', async () => {
-  // Open two chats so there are two chips to reorder.
+test('TopSwitcher chips reorder by recency when a chat is activated', async () => {
   await win.locator('.ts-nav', { hasText: 'History' }).click();
   await win.waitForTimeout(300);
   const rows = win.locator('.session-item');
@@ -96,33 +100,16 @@ test('TopSwitcher chip drag dispatches a chat-id reorder', async () => {
   const chips = win.locator('.top-switcher__chats .ts-chip');
   await expect(chips).toHaveCount(2, { timeout: 4_000 });
 
-  const idsBefore = await chips.evaluateAll((els) =>
-    els.map((el) => el.getAttribute('title') ?? ''),
-  );
+  const namesBefore = await chips.locator('.ts-chip__name').allTextContents();
 
-  // Synthesize a drag from chip[0] to chip[1] via the renderer — playwright's
-  // built-in drag emulation is flaky for HTML5 dataTransfer on Windows.
-  await win.evaluate(() => {
-    const chips = Array.from(
-      document.querySelectorAll('.top-switcher__chats .ts-chip'),
-    ) as HTMLElement[];
-    if (chips.length < 2) throw new Error('need 2 chips');
-    const [src, dst] = chips;
-    const dt = new DataTransfer();
-    src.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
-    // The dragstart handler writes the chat id to dataTransfer
-    dst.dispatchEvent(
-      new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }),
-    );
-    dst.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  });
+  // Activate the last chip — it should bump to the front.
+  await chips.last().click();
   await win.waitForTimeout(300);
 
-  const idsAfter = await chips.evaluateAll((els) =>
-    els.map((el) => el.getAttribute('title') ?? ''),
-  );
-  // Order has flipped (or at least changed)
-  expect(idsAfter.join('|')).not.toBe(idsBefore.join('|'));
+  const namesAfter = await win
+    .locator('.top-switcher__chats .ts-chip .ts-chip__name')
+    .allTextContents();
+  expect(namesAfter[0]).toBe(namesBefore[namesBefore.length - 1]);
 
   // Cleanup
   while ((await win.locator('.chat-tile__close').count()) > 0) {

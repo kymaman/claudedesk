@@ -6,20 +6,20 @@
  *      regardless of which view is active.
  */
 
-import { For, Show } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { store, setActiveTask, toggleNewTaskDialog } from '../store/store';
 import { mainView, setMainView, type MainView } from '../store/mainView';
 import {
   openChats,
-  openChatsInProject,
+  chipChats,
   activeChatId,
   setActiveChatId,
   closeChat,
-  reorderChat,
+  renameChat,
+  titleFor,
 } from '../store/chats';
 import { activeProjectId } from '../store/chat-projects';
 import { assistantOpen, toggleAssistant } from '../store/assistant';
-import { DragMime, acceptDrag, handleDrop, setDragPayload } from '../lib/drag-mime';
 import './TopSwitcher.css';
 
 interface NavItem {
@@ -41,6 +41,35 @@ export function TopSwitcher() {
     store.taskOrder
       .map((id) => store.tasks[id])
       .filter((t): t is NonNullable<typeof t> => Boolean(t));
+
+  // Inline-rename state for the chat chips: which chip is being edited
+  // and its draft text. Double-clicking a chip name opens the editor.
+  const [editingChipId, setEditingChipId] = createSignal<string | null>(null);
+  const [draftTitle, setDraftTitle] = createSignal('');
+  // Set true by Escape so the input's blur handler (which fires when the
+  // editor unmounts) doesn't commit the discarded draft.
+  let renameCancelled = false;
+
+  function beginRenameChip(chatId: string, current: string) {
+    renameCancelled = false;
+    setDraftTitle(current);
+    setEditingChipId(chatId);
+  }
+  function commitRenameChip(chatId: string) {
+    // Skip if Escape already cancelled this edit (blur fires on unmount).
+    if (renameCancelled) {
+      renameCancelled = false;
+      return;
+    }
+    if (editingChipId() !== chatId) return;
+    const next = draftTitle().trim();
+    if (next) renameChat(chatId, next);
+    setEditingChipId(null);
+  }
+  function cancelRenameChip() {
+    renameCancelled = true;
+    setEditingChipId(null);
+  }
 
   return (
     <div class="top-switcher">
@@ -64,37 +93,59 @@ export function TopSwitcher() {
       <div class="top-switcher__sep" />
 
       <div class="top-switcher__chats" title="Open chats">
-        {/* Filter chips by current view: in Projects mode, show only the
-            active project's chats so we don't bleed unrelated workspaces.
-            In any other view, show every project-less chat. The chips are
-            draggable for reordering. */}
-        <For
-          each={
-            mainView() === 'projects'
-              ? openChatsInProject(activeProjectId())
-              : openChatsInProject(null)
-          }
-        >
+        {/* Chips are sorted most-recently-used first by chipChats() — clicking
+            a chat bumps it to the front of the strip. (Manual drag-reorder of
+            chips was removed: it fought the recency sort and reordered only the
+            invisible underlying list. Tiles in the grid are still drag-orderable
+            via their headers.) Double-click a chip to rename it inline. */}
+        <For each={mainView() === 'projects' ? chipChats(activeProjectId()) : chipChats(null)}>
           {(chat) => (
             <button
               class={`ts-chip ${activeChatId() === chat.id ? 'ts-chip--active' : ''}`}
-              draggable={true}
-              onDragStart={(e) => setDragPayload(e, DragMime.ChatId, chat.id)}
-              onDragOver={acceptDrag(DragMime.ChatId)}
-              onDrop={handleDrop(DragMime.ChatId, (fromId) => {
-                if (fromId === chat.id) return;
-                const targetIndex = openChats().findIndex((c) => c.id === chat.id);
-                if (targetIndex >= 0) reorderChat(fromId, targetIndex);
-              })}
               onClick={() => {
+                if (editingChipId() === chat.id) return;
                 setActiveChatId(chat.id);
                 if (mainView() !== 'projects') setMainView('chats');
               }}
-              title={`${chat.title} · ${chat.cwd} · drag to reorder`}
+              onDblClick={(e) => {
+                e.stopPropagation();
+                beginRenameChip(chat.id, titleFor(chat));
+              }}
+              title={`${titleFor(chat)} · ${chat.cwd} · double-click to rename`}
             >
-              <span class="ts-chip__name">
-                {chat.title.length > 22 ? chat.title.slice(0, 20) + '…' : chat.title}
-              </span>
+              <Show
+                when={editingChipId() === chat.id}
+                fallback={
+                  <span class="ts-chip__name">
+                    {(() => {
+                      const t = titleFor(chat);
+                      return t.length > 22 ? t.slice(0, 20) + '…' : t;
+                    })()}
+                  </span>
+                }
+              >
+                <input
+                  class="ts-chip__rename"
+                  value={draftTitle()}
+                  ref={(el) => requestAnimationFrame(() => (el.focus(), el.select()))}
+                  onInput={(e) => setDraftTitle(e.currentTarget.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onBlur={() => commitRenameChip(chat.id)}
+                  onKeyDown={(e) => {
+                    // Keep keys local — Escape/Enter must not reach the global
+                    // window shortcut handler (Escape there can close dialogs /
+                    // the window, which would abort the rename entirely).
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitRenameChip(chat.id);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelRenameChip();
+                    }
+                  }}
+                />
+              </Show>
               <span
                 class="ts-chip__close"
                 onClick={(e) => {

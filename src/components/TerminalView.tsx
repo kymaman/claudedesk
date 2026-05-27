@@ -505,43 +505,15 @@ export function TerminalView(props: TerminalViewProps) {
           enqueueInput(text);
         }, 200)
       : undefined;
-    if (taEl) {
-      taEl.addEventListener(
-        'input',
-        () => {
-          // Defer one microtask so xterm's input handler (which clears
-          // the textarea) runs first. If it does NOT clear, this is
-          // external paste — forward. Only the focused chat forwards so
-          // dictation never lands in a background terminal.
-          // eslint-disable-next-line solid/reactivity -- microtask reads current props.isFocused intentionally; not a tracked scope by design
-          queueMicrotask(() => {
-            if (props.isFocused === false) {
-              taEl.value = '';
-              return;
-            }
-            if (taEl.value && taEl.value.length > 0) {
-              const text = taEl.value;
-              taEl.value = '';
-              enqueueInput(text);
-            }
-          });
-        },
-        false,
-      );
-      taEl.addEventListener(
-        'paste',
-        (e: Event) => {
-          if (props.isFocused === false) return;
-          const ce = e as ClipboardEvent;
-          const text = ce.clipboardData?.getData('text/plain') ?? '';
-          if (text.length === 0) return;
-          // Some external tools dispatch paste but don't actually fill
-          // the clipboard the way xterm expects. Forward explicitly.
-          enqueueInput(text);
-        },
-        false,
-      );
-    }
+    // Whisper Flow safety net is the 200 ms poll above ONLY. We previously
+    // also hooked `input` and `paste` events on the helper-textarea, but
+    // those duplicated every normal Ctrl+V — xterm already handles paste
+    // natively, and our listeners forwarded the same text again. Result:
+    // a single paste landed in the terminal 3 times. The poll alone is
+    // enough for Wispr Flow (it writes textarea.value programmatically
+    // without firing input events, so the poll's 200 ms window catches
+    // dictation while xterm's own keystroke pipeline keeps regular typing
+    // and pasting exclusive — no double-fire).
 
     // Mount-time sizing race: Solid places the element in the DOM, but the
     // browser may not have settled the layout pass when onMount() runs — so

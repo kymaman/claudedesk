@@ -502,6 +502,13 @@ export function TerminalView(props: TerminalViewProps) {
           // SendInput unicode mode, Wispr, etc.
           const text = taEl.value;
           taEl.value = '';
+          // Skip single-char residue. xterm sometimes leaves the just-
+          // typed char in the helper textarea for a few ms (varies by
+          // browser/IME) — forwarding it duplicates the keystroke. The
+          // user reported this as "пробел ставится дважды". Wispr Flow
+          // and other dictation tools always inject phrases (≥2 chars),
+          // so a length-1 sample is unambiguously stray.
+          if (text.length <= 1) return;
           enqueueInput(text);
         }, 200)
       : undefined;

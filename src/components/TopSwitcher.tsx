@@ -20,7 +20,18 @@ import {
 } from '../store/chats';
 import { activeProjectId } from '../store/chat-projects';
 import { assistantOpen, toggleAssistant } from '../store/assistant';
+import type { Chat } from '../store/chats';
 import './TopSwitcher.css';
+
+// Truncate-with-ellipsis at the chip's visual budget. Lives outside
+// JSX so Solid sees a plain function call in `{chipDisplayTitle(chat)}`,
+// which IS wrapped in a tracking scope. An inline IIFE
+// `{(() => titleFor(chat))()}` was NOT — Solid evaluated the IIFE once
+// and the chip never updated on rename.
+function chipDisplayTitle(chat: Pick<Chat, 'id' | 'title'>): string {
+  const t = titleFor(chat);
+  return t.length > 22 ? t.slice(0, 20) + '…' : t;
+}
 
 interface NavItem {
   id: MainView;
@@ -117,10 +128,11 @@ export function TopSwitcher() {
                 when={editingChipId() === chat.id}
                 fallback={
                   <span class="ts-chip__name">
-                    {(() => {
-                      const t = titleFor(chat);
-                      return t.length > 22 ? t.slice(0, 20) + '…' : t;
-                    })()}
+                    {/* Bare function call — Solid wraps {expr} in a tracking
+                        scope so titleFor's signal re-runs this on rename.
+                        The previous IIFE `{(() => ...)()}` returned a static
+                        string and broke reactivity in production builds. */}
+                    {chipDisplayTitle(chat)}
                   </span>
                 }
               >

@@ -100,8 +100,15 @@ const [_activityTick, _setActivityTick] = createRoot<RootSig<number>>(() => crea
  * `titleFor(chat)`. The Map is paired with `_titleTick` so reading
  * subscribes to renames reactively.
  */
-const _titleOverrides = new Map<string, string>();
-const [_titleTick, _setTitleTick] = createRoot<RootSig<number>>(() => createSignal(0));
+// Solid signal wrapping a Map — reading `_titleOverrides()` tracks the
+// signal in any reactive scope (effect, JSX, memo). Bumping the signal
+// (by setting a new Map) fires re-renders everywhere titleFor is read.
+// Replaced an earlier `Map + separate tick signal` pair whose tick was
+// not always tracked in JSX (production minification sometimes inlined
+// the read out of a tracking scope, so chip-strip rename looked broken).
+const [_titleOverrides, _setTitleOverrides] = createRoot<RootSig<Map<string, string>>>(() =>
+  createSignal(new Map<string, string>()),
+);
 
 export const chats = _chats;
 export const activeChatId = _activeChatId;
@@ -112,8 +119,7 @@ export const activeChatId = _activeChatId;
  * is rendered — `chat.title` directly is a stale read.
  */
 export function titleFor(chat: Pick<Chat, 'id' | 'title'>): string {
-  _titleTick();
-  return _titleOverrides.get(chat.id) ?? chat.title;
+  return _titleOverrides().get(chat.id) ?? chat.title;
 }
 
 /**
@@ -397,7 +403,7 @@ export function branchChat(chatId: string): Chat | null {
   ];
 
   const now = Date.now();
-  const baseTitle = _titleOverrides.get(src.id) ?? src.title;
+  const baseTitle = _titleOverrides().get(src.id) ?? src.title;
   const branched: Chat = {
     id: crypto.randomUUID(),
     sessionId: src.sessionId,
@@ -465,15 +471,16 @@ export function branchChatFromSession(
 }
 
 export function renameChat(chatId: string, title: string): void {
-  // Update the side override Map + tick so subscribers (chip strip,
-  // tile head) re-render immediately via titleFor().
-  _titleOverrides.set(chatId, title);
-  _setTitleTick((n) => n + 1);
+  // Create a NEW Map so the signal sees a fresh reference and notifies
+  // subscribers. Solid's `===` equality check on signals would skip
+  // notifications if we mutated the existing Map in place.
+  _setTitleOverrides((prev) => {
+    const next = new Map(prev);
+    next.set(chatId, title);
+    return next;
+  });
   // Also write the new title onto the chat object in the array so
-  // persistence and any non-titleFor readers eventually see it. The
-  // chat ref change here is allowed — chat tiles already display-
-  // toggle (don't remount on hidden), so any churn from this map
-  // doesn't kill PTYs.
+  // persistence (and any non-titleFor reader) sees it.
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
   schedulePersistOpenChats();
 }
@@ -558,6 +565,21 @@ export function flushPersistOpenChatsForTest(): void {
     _persistTimer = null;
   }
   persistOpenChats();
+}
+
+// Drain the pending debounce when the app is being closed. Without this,
+// any chat mutation in the last ~500 ms before quit is silently lost —
+// reopen the app and yesterday's tabs are missing. localStorage.setItem
+// runs synchronously, so it completes before the unload finishes.
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    flushPersistOpenChatsForTest();
+  });
+  // pagehide fires on Electron quit in cases where beforeunload doesn't —
+  // belt-and-braces, same flush.
+  window.addEventListener('pagehide', () => {
+    flushPersistOpenChatsForTest();
+  });
 }
 
 // Mutation sites call schedulePersistOpenChats() directly. A previous

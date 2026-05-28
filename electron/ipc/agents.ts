@@ -15,12 +15,14 @@ interface AgentDef {
 import path from 'path';
 import { homedir } from 'os';
 import { IS_WINDOWS } from '../platform.js';
+import { resolveClaudeBinary } from './claude-resolver.js';
 
-// Default Windows claude binaries. Resolved against the current user's home
-// directory so the app ships with working defaults for the two common install
-// flavours — npm-global-to-.local and winget. Users with a different layout
-// can override via Agents view → Custom agents.
-const WIN_CLAUDE_47 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
+// On Windows the npm-published `claude.exe` in @anthropic-ai/claude-code/bin
+// is a 500-byte shell-script placeholder — spawning it returns Win32 error 216
+// ("not a valid Win32 application"). The real native binary ships as an
+// optional platform-specific dep (claude-code-win32-x64). resolveClaudeBinary
+// walks the common install layouts and rejects the placeholder by size.
+const WIN_CLAUDE_47 = IS_WINDOWS ? resolveClaudeBinary(homedir()) : 'claude';
 const WIN_CLAUDE_46 = IS_WINDOWS
   ? path.join(homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe')
   : 'claude';

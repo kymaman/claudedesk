@@ -26,6 +26,20 @@ describe('resolveClaudeBinary', () => {
     expect(resolveClaudeBinary(HOME, probe)).toBe(nativePath); // fallback path
   });
 
+  it('finds the real binary in claude-code/bin after postinstall replaced the shim', () => {
+    const anthropicDir = path.join(
+      HOME,
+      'AppData',
+      'Roaming',
+      'npm',
+      'node_modules',
+      '@anthropic-ai',
+    );
+    const binNative = path.join(anthropicDir, 'claude-code', 'bin', 'claude.exe');
+    const probe = makeProbe({ [binNative]: MIN + 1 }, { [anthropicDir]: ['claude-code'] });
+    expect(resolveClaudeBinary(HOME, probe)).toBe(binNative);
+  });
+
   it('finds the real binary inside the isolated hashed npm install layout', () => {
     const anthropicDir = path.join(
       HOME,

@@ -295,7 +295,16 @@ export function openFreshChat(params: {
     console.error('[chats] no Claude agent available');
     return null;
   }
+  // Pre-mint a claude session UUID. Without this, claude internally
+  // assigns its own random uuid for its JSONL when the user types the
+  // first message — and we never observe it, so on next launch the chat
+  // restores as a blank terminal (bug #36). Tasks.ts already mints
+  // upfront via `--session-id <uuid>` for the same reason; chats now
+  // follow the same pattern. Only applied to claude-* agents, since
+  // codex/gemini/copilot don't accept --session-id.
+  const sessionId = baseAgent.id.startsWith('claude-') ? crypto.randomUUID() : undefined;
   const args = [
+    ...(sessionId ? ['--session-id', sessionId] : []),
     ...(params.skipPermissions ? baseAgent.skip_permissions_args : []),
     ...(params.extraFlags ?? []),
   ];
@@ -306,6 +315,7 @@ export function openFreshChat(params: {
   };
   return buildChat({
     id: params.id ?? crypto.randomUUID(),
+    sessionId,
     title: params.title ?? 'New chat',
     cwd: params.cwd,
     baseAgent,
@@ -516,6 +526,11 @@ interface PersistedChat {
   skipPermissions: boolean;
   lastActiveAt: number;
   createdAt: number;
+  /** Position in the grid at persist time. Restored in this order so
+   *  tiles come back where the user left them — sorting by lastActiveAt
+   *  alone scrambled the layout (bug #34). Older snapshots without this
+   *  field fall back to lastActiveAt-ascending. */
+  gridIndex?: number;
 }
 
 /** Snapshot non-project chats to localStorage. Debounced via the createEffect
@@ -523,9 +538,12 @@ interface PersistedChat {
  *  effect runs once per batch. */
 function persistOpenChats(): void {
   try {
-    const snapshot: PersistedChat[] = openChats()
-      .filter((c) => c.projectId === null)
-      .map((c) => ({
+    // Preserve grid order: index in the openChats() array IS the visible
+    // tile position. We sort by gridIndex on restore so tiles land back
+    // exactly where the user had them.
+    const visible = openChats().filter((c) => c.projectId === null);
+    const snapshot: PersistedChat[] = visible
+      .map((c, i) => ({
         id: c.id,
         ...(c.sessionId ? { sessionId: c.sessionId } : {}),
         title: c.title,
@@ -535,8 +553,8 @@ function persistOpenChats(): void {
         skipPermissions: c.settings.skipPermissions,
         lastActiveAt: lastActiveAtFor(c),
         createdAt: c.createdAt,
+        gridIndex: i,
       }))
-      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
       .slice(0, MAX_PERSISTED);
     localStorage.setItem(PERSIST_KEY, JSON.stringify(snapshot));
   } catch {
@@ -620,9 +638,19 @@ export function restoreOpenChats(): void {
     return;
   }
   if (list.length === 0) return;
-  // Sort ascending so the LAST one we open ends up active (matches
-  // "most-recently-used is active and on top").
-  list.sort((a, b) => a.lastActiveAt - b.lastActiveAt);
+  // Restore tiles in their original grid order, not by recency.
+  // gridIndex was added in #34; older snapshots without it fall back to
+  // lastActiveAt-ascending so behaviour doesn't regress for upgrade.
+  list.sort((a, b) => {
+    const ai = a.gridIndex;
+    const bi = b.gridIndex;
+    if (typeof ai === 'number' && typeof bi === 'number') return ai - bi;
+    return a.lastActiveAt - b.lastActiveAt;
+  });
+  // Pick the most-recently-active chat to focus after the loop. The loop
+  // itself sets active on each open, but we override at the end so grid
+  // order isn't tied to "which one we want focused".
+  const mruId = [...list].sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0]?.id;
   for (const p of list) {
     const settings: ChatLaunchSettings = {
       agentId: p.agentDefId,
@@ -652,5 +680,18 @@ export function restoreOpenChats(): void {
         skipPermissions: p.skipPermissions ?? false,
       });
     }
+  }
+  // Restore focus to the most-recently-used chat — independent of grid
+  // order. openFreshChat preserves the persisted id; openChatFromSession
+  // mints a new chat id but carries sessionId forward, so we look up
+  // restored chats by whichever key the persisted record had.
+  const mru = list.find((p) => p.id === mruId);
+  if (mru) {
+    const restored = _chats().find((c) => {
+      if (c.closed) return false;
+      if (mru.sessionId) return c.sessionId === mru.sessionId;
+      return c.id === mru.id;
+    });
+    if (restored) setActiveChatId(restored.id);
   }
 }

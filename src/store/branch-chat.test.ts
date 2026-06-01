@@ -46,6 +46,16 @@ vi.mock('./core', () => ({
         skip_permissions_args: ['--dangerously-skip-permissions'],
         available: true,
       },
+      // Non-claude agent so we can still exercise the "no sessionId" guard
+      // after #36 — fresh claude chats now always have a pre-minted UUID.
+      {
+        id: 'codex',
+        name: 'Codex',
+        command: 'codex',
+        args: [],
+        skip_permissions_args: ['--full-auto'],
+        available: true,
+      },
     ],
   },
 }));
@@ -70,8 +80,15 @@ describe('branchChat', () => {
 
   it('refuses to branch when source chat has no sessionId', async () => {
     const m = await importChats();
-    const fresh = m.openFreshChat({ cwd: '/tmp/proj', title: 'No-session chat' });
+    // Use codex — non-claude agents intentionally skip the session UUID
+    // mint (#36), so the "no sessionId" branch is still reachable.
+    const fresh = m.openFreshChat({
+      cwd: '/tmp/proj',
+      title: 'No-session chat',
+      agentId: 'codex',
+    });
     expect(fresh).not.toBeNull();
+    expect(fresh!.sessionId).toBeUndefined();
     const out = m.branchChat(fresh!.id);
     expect(out).toBeNull();
     // No tile was added.

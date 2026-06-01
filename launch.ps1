@@ -4,7 +4,11 @@
 # - Then launches Electron pointing at dist-electron/main.js
 #
 # Run from the desktop shortcut. Skips rebuild entirely when nothing
-# changed since last build — typical launch is ~1 second.
+# changed since last build -- typical launch is ~1 second.
+#
+# ASCII-only on purpose: PowerShell 5.1 reads .ps1 as ANSI when there
+# is no BOM, and any non-ASCII char (arrows, em-dashes) breaks the
+# tokenizer at unrelated braces. Don't add Unicode here without a BOM.
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -32,28 +36,26 @@ $needFrontend = ($srcNewest -gt $distBuilt) -or (-not (Test-Path "$root\dist\ind
 $needCompile  = ($electronNewest -gt $mainBuilt) -or (-not (Test-Path "$root\dist-electron\main.js"))
 
 if ($needFrontend -or $needCompile) {
-    # Pop a small console so the user sees the rebuild happening instead
-    # of a frozen shortcut.
-    Write-Host "[ClaudeDesk] Source changed — rebuilding..." -ForegroundColor Yellow
+    Write-Host "[ClaudeDesk] Source changed -- rebuilding..." -ForegroundColor Yellow
     if ($needCompile) {
-        Write-Host "  → npm run compile (electron main)" -ForegroundColor DarkGray
+        Write-Host "  -> npm run compile (electron main)" -ForegroundColor DarkGray
         npm run compile
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Compile failed — aborting launch." -ForegroundColor Red
+            Write-Host "Compile failed -- aborting launch." -ForegroundColor Red
             Read-Host "Press Enter to close"
             exit 1
         }
     }
     if ($needFrontend) {
-        Write-Host "  → npm run build:frontend (renderer)" -ForegroundColor DarkGray
+        Write-Host "  -> npm run build:frontend (renderer)" -ForegroundColor DarkGray
         npm run build:frontend
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Frontend build failed — aborting launch." -ForegroundColor Red
+            Write-Host "Frontend build failed -- aborting launch." -ForegroundColor Red
             Read-Host "Press Enter to close"
             exit 1
         }
     }
-    Write-Host "[ClaudeDesk] Build done — launching..." -ForegroundColor Green
+    Write-Host "[ClaudeDesk] Build done -- launching..." -ForegroundColor Green
 }
 
 # Launch Electron detached so the launcher console can close immediately.
@@ -61,7 +63,7 @@ $electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
 $mainJs   = Join-Path $root 'dist-electron\main.js'
 
 if (-not (Test-Path $electron)) {
-    Write-Host "Electron binary missing at $electron — run 'npm install' first." -ForegroundColor Red
+    Write-Host "Electron binary missing at $electron -- run 'npm install' first." -ForegroundColor Red
     Read-Host "Press Enter to close"
     exit 1
 }

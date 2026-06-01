@@ -148,7 +148,8 @@ describe('PTY-survives-click — chat object reference stability', () => {
   });
 
   it('lastActiveAt persisted to localStorage reflects the latest setActiveChatId call, not the chat construction time', async () => {
-    const { openChatFromSession, chats, setActiveChatId } = await importChats();
+    const { openChatFromSession, chats, setActiveChatId, flushPersistOpenChatsForTest } =
+      await importChats();
 
     openChatFromSession(SESSION, SETTINGS);
     const chatA = chats()[0];
@@ -157,6 +158,9 @@ describe('PTY-survives-click — chat object reference stability', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     setActiveChatId(chatA.id);
+
+    // persistOpenChats is debounced; drain so we can read synchronously.
+    flushPersistOpenChatsForTest();
 
     const raw = localStorage.getItem('claudedesk.openChats');
     expect(raw).not.toBeNull();
@@ -172,7 +176,8 @@ describe('PTY-survives-click — chat object reference stability', () => {
   });
 
   it('closing a chat removes its entry from the side Map — no stale entry in persisted list', async () => {
-    const { openChatFromSession, chats, setActiveChatId, closeChat } = await importChats();
+    const { openChatFromSession, chats, setActiveChatId, closeChat, flushPersistOpenChatsForTest } =
+      await importChats();
 
     openChatFromSession(SESSION, SETTINGS);
     const chatA = chats()[0];
@@ -182,10 +187,11 @@ describe('PTY-survives-click — chat object reference stability', () => {
     closeChat(chatA.id);
     await new Promise((r) => setTimeout(r, 60));
 
-    // Open chat B, then call setActiveChatId to force a persistOpenChats
-    // flush (createEffect doesn't re-trigger in Node/vitest environment).
     const chatB = openChatFromSession(SESSION_B, SETTINGS)!;
     setActiveChatId(chatB.id);
+
+    // persistOpenChats is debounced; drain so we can read synchronously.
+    flushPersistOpenChatsForTest();
 
     const raw = localStorage.getItem('claudedesk.openChats');
     expect(raw).not.toBeNull();

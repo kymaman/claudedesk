@@ -654,9 +654,9 @@ function SessionRow(props: {
     });
   });
 
-  // Load persisted launch settings for this session (defaults to opus-4.7 + no flags)
+  // Load persisted launch settings for this session (defaults to opus-4.8 + no flags)
   const [settings, setSettings] = createSignal<LaunchSettings>({
-    agentId: 'claude-opus-4-7',
+    agentId: 'claude-opus-4-8',
     extraFlags: [],
     skipPermissions: false,
   });

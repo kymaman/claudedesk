@@ -187,8 +187,8 @@ export async function resumeSession(
       projectId = addProject(basename, session.projectPath);
     }
 
-    // 2. Pick a Claude binary. Prefer Opus 4.7, then any claude-*, then the first available.
-    const preferred = opts.agentId ?? 'claude-opus-4-7';
+    // 2. Pick a Claude binary. Prefer Opus 4.8, then any claude-*, then the first available.
+    const preferred = opts.agentId ?? 'claude-opus-4-8';
     const available = store.availableAgents;
     const baseAgent =
       available.find((a) => a.id === preferred) ??

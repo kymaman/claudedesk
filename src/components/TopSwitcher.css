@@ -122,6 +122,22 @@
   max-width: 200px;
 }
 
+/* Inline rename editor inside a chip (double-click the chip name). Kept
+   visually flush with the chip so it doesn't jump when the span swaps
+   for the input. */
+.ts-chip__rename {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin: -1px 0;
+  max-width: 200px;
+  min-width: 80px;
+  outline: none;
+}
+
 .ts-chip__close {
   font-size: 14px;
   line-height: 1;

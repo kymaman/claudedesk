@@ -78,13 +78,22 @@ describe('buildChat — fresh path (openFreshChat)', () => {
     });
     expect(chat).toBeTruthy();
     if (!chat) return;
-    expect(chat.sessionId).toBeUndefined();
+    // After #36 fresh claude chats carry a pre-minted session UUID so
+    // restoreOpenChats can --resume on restart.
+    expect(chat.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(chat.title).toBe('New chat');
     expect(chat.cwd).toBe('/tmp/work');
     expect(chat.agentDefId).toBe('claude-opus-4-7');
     expect(chat.command).toBe('claude');
-    // skip-perms flag must come BEFORE extraFlags
-    expect(chat.args).toEqual(['--dangerously-skip-permissions', '--verbose', '--model', 'opus']);
+    // args order: --session-id <uuid>, skip-perms, extraFlags.
+    expect(chat.args).toEqual([
+      '--session-id',
+      chat.sessionId,
+      '--dangerously-skip-permissions',
+      '--verbose',
+      '--model',
+      'opus',
+    ]);
     expect(chat.projectId).toBe('proj-A');
     expect(chat.env).toEqual({});
     expect(chat.closed).toBe(false);
@@ -105,7 +114,8 @@ describe('buildChat — fresh path (openFreshChat)', () => {
       skipPermissions: false,
       extraFlags: ['--debug'],
     });
-    expect(chat?.args).toEqual(['--debug']);
+    // --session-id <uuid> still prepended for claude agents (#36).
+    expect(chat?.args).toEqual(['--session-id', chat?.sessionId, '--debug']);
   });
 
   it('uses null projectId when caller omits it', async () => {

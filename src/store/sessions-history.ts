@@ -13,6 +13,7 @@
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { filterState } from './session-filters';
 import { hiddenSessions } from './session-hide';
+import { openChats, titleFor } from './chats';
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from electron/ipc/session-history.ts)
@@ -109,13 +110,44 @@ export function smartProjectGroups(): { projectPath: string; basename: string; c
   return out;
 }
 
+/**
+ * Synthesize "ephemeral" SessionItems for every open chat that carries a
+ * sessionId but doesn't yet have a JSONL on disk (because claude only
+ * writes the file after the first turn). Without this, brand-new chats
+ * never showed up in History until the user had typed AND the user
+ * refreshed — which the History panel has no manual button for. (#35)
+ *
+ * Disk-loaded sessions win on dedup: once claude writes the JSONL and
+ * loadSessions() picks it up, the ephemeral entry is dropped in favor
+ * of the real one (preserving folderIds, description, etc.).
+ */
+function sessionsWithOpenChats(): SessionItem[] {
+  const disk = sessions();
+  const known = new Set(disk.map((s) => s.sessionId));
+  const ephemeral: SessionItem[] = [];
+  for (const c of openChats()) {
+    if (!c.sessionId || known.has(c.sessionId)) continue;
+    ephemeral.push({
+      sessionId: c.sessionId,
+      filePath: '',
+      projectPath: c.cwd,
+      title: titleFor(c),
+      // Use ISO date so sort:newest places fresh chats above older disk
+      // sessions — matches the "just opened" feel.
+      date: new Date(c.createdAt).toISOString(),
+      folderIds: [],
+    });
+  }
+  return ephemeral.length === 0 ? disk : [...disk, ...ephemeral];
+}
+
 export function filteredSessions(): SessionItem[] {
   const q = searchQuery().toLowerCase().trim();
   const folderId = activeFolderId();
   const projectPath = activeProjectPath();
   const f = filterState();
   const hidden = hiddenSessions();
-  let list = sessions();
+  let list = sessionsWithOpenChats();
 
   // Session-level hide (right-click → Delete from view)
   if (hidden.size > 0) {

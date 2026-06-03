@@ -5,20 +5,24 @@
  * TerminalView. Tile selection ring shows the active chat.
  */
 
-import { For, Show, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
 import {
   activeChatId,
   setActiveChatId,
   closeChat,
   renameChat,
+  branchChat,
   openChats,
   MAX_CHATS_PER_WINDOW,
   reorderChat,
+  titleFor,
   type Chat,
 } from '../store/chats';
 import { TerminalView } from './TerminalView';
 import { DragMime, acceptDrag, dragHasMime, handleDrop, setDragPayload } from '../lib/drag-mime';
 import { markDirty } from '../lib/terminalFitManager';
+import { invoke } from '../lib/ipc';
+import { IPC } from '../../electron/ipc/channels';
 import './ChatsGrid.css';
 
 function columnsForCount(n: number): number {
@@ -79,10 +83,38 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
   const [isDropTarget, setIsDropTarget] = createSignal(false);
   // Right-click context menu on the tile head → Rename / Close.
   const [menuOpen, setMenuOpen] = createSignal(false);
+  let headRef: HTMLDivElement | undefined;
+
+  // Close the menu when the user clicks anywhere outside it (mirrors the
+  // History/Folder rows). Without this the only way to dismiss the menu
+  // is the Cancel button — annoying when you opened it by mistake.
+  createEffect(() => {
+    if (!menuOpen()) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('.chat-tile__menu')) return;
+      if (headRef && t && headRef.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    // setTimeout(0) so the same right-click that opened the menu doesn't
+    // immediately close it via this listener.
+    const tm = setTimeout(() => {
+      document.addEventListener('mousedown', onDown);
+      document.addEventListener('keydown', onEsc);
+    }, 0);
+    onCleanup(() => {
+      clearTimeout(tm);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onEsc);
+    });
+  });
 
   function onRename(e: MouseEvent) {
     e.stopPropagation();
-    const current = props.chat.title;
+    const current = titleFor(props.chat);
     const next = window.prompt('Rename chat', current);
     if (next && next.trim() && next !== current) renameChat(props.chat.id, next.trim());
   }
@@ -148,6 +180,7 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
       onDrop={onTileDrop}
     >
       <div
+        ref={headRef}
         class="chat-tile__head"
         draggable={true}
         onDragStart={onHeadDragStart}
@@ -155,7 +188,7 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
         title="Drag to reorder · double-click title to rename · right-click for menu"
       >
         <span class="chat-tile__title" title={props.chat.cwd} onDblClick={onRename}>
-          {props.chat.title}
+          {titleFor(props.chat)}
         </span>
         <span class="chat-tile__agent">{props.chat.agentDefId.replace(/^claude-/, '')}</span>
         <button
@@ -173,11 +206,53 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
             <button
               class="chat-tile__menu-item"
               onClick={(e) => {
-                setMenuOpen(false);
+                // IMPORTANT: run the rename BEFORE closing the menu.
+                // setMenuOpen(false) tears down the <Show> subtree
+                // synchronously, which can interrupt window.prompt mid-
+                // handler on some Electron builds — the prompt never
+                // returns and renameChat is skipped. Closing the menu
+                // is cosmetic; do it after.
                 onRename(e);
+                setMenuOpen(false);
               }}
             >
               Rename
+            </button>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                // Open the chat's working directory in the OS file
+                // manager. OpenPath accepts folders fine — the dangerous-
+                // extension regex never matches a directory path.
+                void invoke<string>(IPC.OpenPath, { filePath: props.chat.cwd }).catch((err) => {
+                  console.warn('[chat-tile] OpenPath failed:', err);
+                });
+              }}
+              title={props.chat.cwd}
+            >
+              Open folder
+            </button>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                // Branch = clone the chat into a sibling tile that shares
+                // context up to this point (claude --fork-session). Only
+                // available once a sessionId exists — log a hint otherwise.
+                const out = branchChat(props.chat.id);
+                if (!out) {
+                  console.warn(
+                    '[chat-tile] Branch unavailable: chat has no sessionId yet ' +
+                      '(send at least one message first so claude mints a session).',
+                  );
+                }
+              }}
+              title="Open a parallel copy of this chat sharing context (claude --fork-session)"
+            >
+              Branch
             </button>
             <button
               class="chat-tile__menu-item"

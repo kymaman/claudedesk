@@ -27,3 +27,4 @@ docs/*
 # Playwright test artifacts
 test-results/
 playwright-report/
+playwright-full.log

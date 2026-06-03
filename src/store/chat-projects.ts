@@ -161,7 +161,7 @@ export async function openProject(projectId: string): Promise<void> {
         const saved = await loadLaunchSettings(s.sessionId);
         openChatFromSession(
           s,
-          saved ?? { agentId: 'claude-opus-4-7', extraFlags: [], skipPermissions: false },
+          saved ?? { agentId: 'claude-opus-4-8', extraFlags: [], skipPermissions: false },
           { projectId },
         );
       }),

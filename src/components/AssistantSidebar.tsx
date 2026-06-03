@@ -90,7 +90,6 @@ export function AssistantSidebar() {
   }
 
   const agent = () =>
-    store.availableAgents.find((a) => a.id === 'claude-opus-4-8') ??
     store.availableAgents.find((a) => a.id === 'claude-opus-4-7') ??
     store.availableAgents.find((a) => a.id.startsWith('claude-')) ??
     store.availableAgents[0];
@@ -119,7 +118,7 @@ export function AssistantSidebar() {
     const s = sessions().find((x) => x.sessionId.toLowerCase() === sessionId.toLowerCase());
     if (!s) return;
     openChatFromSession(s, {
-      agentId: agent()?.id ?? 'claude-opus-4-8',
+      agentId: agent()?.id ?? 'claude-opus-4-7',
       extraFlags: [],
       skipPermissions: false,
     });

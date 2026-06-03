@@ -17,6 +17,7 @@ import { terminalDefaults } from '../store/terminal-defaults';
 import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
 import { listenXtermBridge } from '../lib/xterm-bridge';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
+import { AltScreenStripper } from '../lib/strip-alt-screen';
 import type { PtyOutput } from '../ipc/types';
 
 // Pre-computed base64 lookup table — avoids atob() intermediate string allocation.
@@ -642,7 +643,16 @@ export function TerminalView(props: TerminalViewProps) {
       });
     }
 
-    function enqueueOutput(chunk: Uint8Array) {
+    // Strip DECSET ?1049/?1047/?47 so the upstream CLI cannot lock the
+    // user out of scrollback by entering the alt buffer. Claude's TUI
+    // redraws still work (it uses cursor-home + erase-in-display),
+    // they just happen in the normal buffer now → rows that scroll
+    // off the top land in scrollback the user can scroll up to. (#38)
+    const altScreenStripper = new AltScreenStripper();
+
+    function enqueueOutput(rawChunk: Uint8Array) {
+      const chunk = altScreenStripper.push(rawChunk);
+      if (chunk.length === 0) return;
       outputQueue.push(chunk);
       outputQueuedBytes += chunk.length;
       watermark += chunk.length;

@@ -74,29 +74,48 @@ async function importBoth() {
   return { chats, history };
 }
 
-describe('bug #35 — History shows freshly-opened chats without refresh', () => {
+describe('bug #35 — History shows OPEN chats with a sessionId without refresh', () => {
+  // The merge runs only for chats that carry a sessionId — i.e. chats
+  // opened from History (--resume). Fresh chats no longer carry one
+  // (removed in #39 because --session-id broke claude's scrollback),
+  // so they're invisible in History until claude writes their JSONL
+  // and loadSessions() picks it up on the next refresh.
   beforeEach(() => localStorage.clear());
   afterEach(() => localStorage.clear());
 
-  it('filteredSessions includes open chats not yet on disk', async () => {
-    const { chats, history } = await importBoth();
-    // Disk is empty; only an in-memory chat exists.
-    const chat = chats.openFreshChat({ cwd: '/tmp/proj', title: 'just-opened' });
-    expect(chat!.sessionId).toBeTruthy();
+  const RESUMED_SESSION = {
+    sessionId: 'sess-history-merge-0001',
+    filePath: '/var/sessions/sess-history-merge-0001.jsonl',
+    projectPath: '/tmp/proj',
+    title: 'pre-loaded',
+    date: '2026-05-28',
+    folderIds: [] as string[],
+  };
 
+  it('a chat opened via openChatFromSession appears in filteredSessions immediately', async () => {
+    const { chats, history } = await importBoth();
+    const chat = chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    expect(chat!.sessionId).toBe(RESUMED_SESSION.sessionId);
+
+    // Disk is empty; the entry comes purely from the open-chats merger.
     const visible = history.filteredSessions();
     expect(visible.length).toBe(1);
-    expect(visible[0]!.sessionId).toBe(chat!.sessionId);
-    expect(visible[0]!.title).toBe('just-opened');
-    // Ephemeral entries have no filePath until the JSONL is written.
+    expect(visible[0]!.sessionId).toBe(RESUMED_SESSION.sessionId);
+    // Ephemeral entries have empty filePath until disk picks them up.
     expect(visible[0]!.filePath).toBe('');
   });
 
-  it('disk session wins when both disk and open-chat have the same sessionId', async () => {
+  it('disk session wins when both disk and open-chat share a sessionId', async () => {
     const { chats, history } = await importBoth();
-    const chat = chats.openFreshChat({ cwd: '/tmp/proj', title: 'in-memory-title' })!;
-    // Simulate loadSessions() landing — claude wrote a JSONL with the same
-    // sessionId, plus metadata (folderIds, description) that ephemeral has not.
+    const chat = chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    })!;
     history.setSessions([
       {
         sessionId: chat.sessionId!,
@@ -108,37 +127,27 @@ describe('bug #35 — History shows freshly-opened chats without refresh', () =>
         folderIds: ['folder-1'],
       },
     ]);
-
     const visible = history.filteredSessions();
     expect(visible.length).toBe(1);
     expect(visible[0]!.title).toBe('real-on-disk');
-    expect(visible[0]!.filePath).toBe('/jsonl/path.jsonl');
     expect(visible[0]!.folderIds).toEqual(['folder-1']);
   });
 
-  it('multiple open chats with no disk sessions all appear', async () => {
+  it('fresh chats (no sessionId) are NOT merged — would need claude to write JSONL first', async () => {
     const { chats, history } = await importBoth();
     chats.openFreshChat({ cwd: '/a', title: 'A' });
     chats.openFreshChat({ cwd: '/b', title: 'B' });
-    chats.openFreshChat({ cwd: '/c', title: 'C' });
-    const titles = history
-      .filteredSessions()
-      .map((s) => s.title)
-      .sort();
-    expect(titles).toEqual(['A', 'B', 'C']);
-  });
-
-  it('open chat with no sessionId (non-claude agent) is NOT merged', async () => {
-    const { chats, history } = await importBoth();
-    chats.openFreshChat({ cwd: '/x', agentId: 'codex', title: 'codex-chat' });
     expect(history.filteredSessions()).toEqual([]);
   });
 
-  it('renaming an open chat updates its title in History live', async () => {
+  it('renaming a resumed chat updates its title in History live', async () => {
     const { chats, history } = await importBoth();
-    const chat = chats.openFreshChat({ cwd: '/tmp/proj', title: 'before' })!;
-    chats.renameChat(chat.id, 'after');
-    const visible = history.filteredSessions();
-    expect(visible[0]!.title).toBe('after');
+    const chat = chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    })!;
+    chats.renameChat(chat.id, 'renamed');
+    expect(history.filteredSessions()[0]!.title).toBe('renamed');
   });
 });

@@ -78,22 +78,18 @@ describe('buildChat — fresh path (openFreshChat)', () => {
     });
     expect(chat).toBeTruthy();
     if (!chat) return;
-    // After #36 fresh claude chats carry a pre-minted session UUID so
-    // restoreOpenChats can --resume on restart.
-    expect(chat.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    // Fresh chats no longer carry a pre-minted session UUID — passing
+    // `--session-id <uuid>` to claude changed its TUI in a way that
+    // broke scrollback for users. claude mints its own uuid on first
+    // message and we accept that fresh-without-messages chats don't
+    // survive an app restart.
+    expect(chat.sessionId).toBeUndefined();
     expect(chat.title).toBe('New chat');
     expect(chat.cwd).toBe('/tmp/work');
     expect(chat.agentDefId).toBe('claude-opus-4-7');
     expect(chat.command).toBe('claude');
-    // args order: --session-id <uuid>, skip-perms, extraFlags.
-    expect(chat.args).toEqual([
-      '--session-id',
-      chat.sessionId,
-      '--dangerously-skip-permissions',
-      '--verbose',
-      '--model',
-      'opus',
-    ]);
+    // skip-perms first, then extraFlags. No --session-id, no --model.
+    expect(chat.args).toEqual(['--dangerously-skip-permissions', '--verbose', '--model', 'opus']);
     expect(chat.projectId).toBe('proj-A');
     expect(chat.env).toEqual({});
     expect(chat.closed).toBe(false);
@@ -114,8 +110,8 @@ describe('buildChat — fresh path (openFreshChat)', () => {
       skipPermissions: false,
       extraFlags: ['--debug'],
     });
-    // --session-id <uuid> still prepended for claude agents (#36).
-    expect(chat?.args).toEqual(['--session-id', chat?.sessionId, '--debug']);
+    // No --session-id flag — see comment in the test above.
+    expect(chat?.args).toEqual(['--debug']);
   });
 
   it('uses null projectId when caller omits it', async () => {

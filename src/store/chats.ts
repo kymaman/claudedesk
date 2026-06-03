@@ -295,16 +295,14 @@ export function openFreshChat(params: {
     console.error('[chats] no Claude agent available');
     return null;
   }
-  // Pre-mint a claude session UUID. Without this, claude internally
-  // assigns its own random uuid for its JSONL when the user types the
-  // first message — and we never observe it, so on next launch the chat
-  // restores as a blank terminal (bug #36). Tasks.ts already mints
-  // upfront via `--session-id <uuid>` for the same reason; chats now
-  // follow the same pattern. Only applied to claude-* agents, since
-  // codex/gemini/copilot don't accept --session-id.
-  const sessionId = baseAgent.id.startsWith('claude-') ? crypto.randomUUID() : undefined;
+  // No pre-mint: passing `--session-id <uuid>` changed claude's TUI
+  // behaviour enough that the user lost the ability to scroll up to
+  // see conversation history. Fresh chats now start without that flag
+  // — claude mints its own session UUID when the user sends the first
+  // message, and we accept the trade-off that fresh chats with no
+  // messages yet don't survive an app restart (they would restore as
+  // a blank claude anyway because no JSONL exists).
   const args = [
-    ...(sessionId ? ['--session-id', sessionId] : []),
     ...(params.skipPermissions ? baseAgent.skip_permissions_args : []),
     ...(params.extraFlags ?? []),
   ];
@@ -315,7 +313,6 @@ export function openFreshChat(params: {
   };
   return buildChat({
     id: params.id ?? crypto.randomUUID(),
-    sessionId,
     title: params.title ?? 'New chat',
     cwd: params.cwd,
     baseAgent,

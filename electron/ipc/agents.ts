@@ -16,43 +16,58 @@ import path from 'path';
 import { homedir } from 'os';
 import { IS_WINDOWS } from '../platform.js';
 
-// Default Windows claude binaries. Resolved against the current user's home
-// directory so the app ships with working defaults for the two common install
-// flavours — npm-global-to-.local and winget. Users with a different layout
-// can override via Agents view → Custom agents.
+// One binary per Opus version. Empirically `--model <id>` on a single
+// shared CLI changed claude's TUI behaviour enough to make terminal
+// scrollback unreachable for users; the cleanest mitigation is to
+// install one CLI per supported model and select via PATH alone — no
+// `--model` flag. Users without the binary can grab it from
+// CLAUDE_DOWNLOAD_URLS below (UI exposes a "Download" button next to
+// each missing agent).
 //
-// As of Claude Code 2.1.157 the `.local/bin/claude.exe` binary supports
-// both Opus 4.7 and Opus 4.8 — model selection moves to an explicit
-// `--model <id>` flag rather than relying on the CLI version's default.
-// The old WinGet binary (2.1.101) stays around for Opus 4.6.
-const WIN_CLAUDE_MODERN = IS_WINDOWS
-  ? path.join(homedir(), '.local', 'bin', 'claude.exe')
+// Layout convention (Windows):
+//   ~/.local/bin/claude.exe                          → 4.8 (npm latest install)
+//   ~/.local/bin/claude-4.7/claude.exe               → 4.7 (CLI 2.1.116)
+//   ~/AppData/Local/Microsoft/WinGet/Links/claude.exe → 4.6 (WinGet, CLI 2.1.101)
+const WIN_CLAUDE_48 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
+const WIN_CLAUDE_47 = IS_WINDOWS
+  ? path.join(homedir(), '.local', 'bin', 'claude-4.7', 'claude.exe')
   : 'claude';
 const WIN_CLAUDE_46 = IS_WINDOWS
   ? path.join(homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe')
   : 'claude';
 
+/**
+ * Official tarball URLs for each Opus version's Claude Code CLI. Used by
+ * the Agents view to offer a one-click "Download" when a binary is
+ * missing. Anyone — not just the original author — can fetch these
+ * because they're the npm public registry, no auth.
+ */
+export const CLAUDE_DOWNLOAD_URLS: Record<string, string | null> = {
+  'claude-opus-4-8': null, // latest — install via `npm i -g @anthropic-ai/claude-code`
+  'claude-opus-4-7':
+    'https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.116.tgz',
+  'claude-opus-4-6':
+    'https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.101.tgz',
+};
+
 const DEFAULT_AGENTS: AgentDef[] = [
   {
     id: 'claude-opus-4-8',
     name: 'Claude Code (Opus 4.8)',
-    command: IS_WINDOWS ? WIN_CLAUDE_MODERN : 'claude',
-    args: ['--model', 'claude-opus-4-8'],
+    command: IS_WINDOWS ? WIN_CLAUDE_48 : 'claude',
+    args: [],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.157+ — Opus 4.8 (latest)',
+    description: 'Claude Code 2.1.157+ — Opus 4.8 (default install at ~/.local/bin/claude.exe)',
   },
   {
     id: 'claude-opus-4-7',
     name: 'Claude Code (Opus 4.7)',
-    // Same binary as 4.8 now — but we MUST pass --model explicitly,
-    // otherwise the CLI's default (4.8 in 2.1.157+) would override the
-    // user's pick. Without this, selecting "Opus 4.7" silently gave 4.8.
-    command: IS_WINDOWS ? WIN_CLAUDE_MODERN : 'claude',
-    args: ['--model', 'claude-opus-4-7'],
+    command: IS_WINDOWS ? WIN_CLAUDE_47 : 'claude',
+    args: [],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.157+ — pinned to Opus 4.7',
+    description: 'Claude Code 2.1.116 — Opus 4.7 (install via Download button)',
   },
   {
     id: 'claude-opus-4-6',
@@ -61,7 +76,7 @@ const DEFAULT_AGENTS: AgentDef[] = [
     args: [],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.101 — legacy CLI required for Opus 4.6',
+    description: 'Claude Code 2.1.101 — Opus 4.6 (WinGet install)',
   },
   {
     id: 'claude-code',

@@ -58,47 +58,43 @@ async function importChats() {
   return await import('./chats');
 }
 
-describe('openFreshChat — bug #36 pre-mint sessionId', () => {
+describe('openFreshChat — no pre-mint sessionId (broke scrollback)', () => {
+  // The earlier #36 fix pre-minted a UUID and passed it to claude as
+  // `--session-id <uuid>`. Users reported terminal scrollback became
+  // unreachable; removing the flag fixed it. Fresh chats now start
+  // without a sessionId. Restore-time recovery for fresh-without-
+  // messages chats is intentionally given up (no JSONL to resume).
   beforeEach(() => localStorage.clear());
   afterEach(() => localStorage.clear());
 
-  it('fresh chat has a UUID sessionId and --session-id flag in args', async () => {
+  it('fresh chat carries NO sessionId and NO --session-id flag', async () => {
     const m = await importChats();
     const chat = m.openFreshChat({ cwd: '/tmp/proj', title: 'fresh-A' });
     expect(chat).not.toBeNull();
-    expect(chat!.sessionId, 'fresh chats must carry a pre-minted sessionId').toBeTruthy();
-    expect(chat!.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-    // The CLI flag must reference the SAME UUID we stored on the chat.
-    const idx = chat!.args.indexOf('--session-id');
-    expect(idx, 'args must contain --session-id').toBeGreaterThanOrEqual(0);
-    expect(chat!.args[idx + 1]).toBe(chat!.sessionId);
-  });
-
-  it('non-claude agents do NOT get a session UUID (codex/gemini/copilot)', async () => {
-    const m = await importChats();
-    const chat = m.openFreshChat({ cwd: '/x', agentId: 'codex', title: 't' });
-    expect(chat!.sessionId, 'non-claude agents must NOT get a session UUID').toBeUndefined();
+    expect(chat!.sessionId).toBeUndefined();
     expect(chat!.args).not.toContain('--session-id');
   });
 
-  it('round-trip: persisted snapshot includes sessionId and restore preserves it', async () => {
+  it('non-claude agents (codex) also have no sessionId — unchanged', async () => {
+    const m = await importChats();
+    const chat = m.openFreshChat({ cwd: '/x', agentId: 'codex', title: 't' });
+    expect(chat!.sessionId).toBeUndefined();
+    expect(chat!.args).not.toContain('--session-id');
+  });
+
+  it('persisted snapshot of a fresh chat has no sessionId; restore is via openFreshChat', async () => {
     let m = await importChats();
-    const first = m.openFreshChat({ cwd: '/tmp/p', title: 'has-session' });
-    expect(first!.sessionId).toBeTruthy();
-    const expectedSid = first!.sessionId!;
+    const first = m.openFreshChat({ cwd: '/tmp/p', title: 'fresh' });
+    expect(first!.sessionId).toBeUndefined();
     m.flushPersistOpenChatsForTest();
 
-    // Re-import the module — simulates app restart. localStorage is shared.
     m = await importChats();
     m.restoreOpenChats();
-    expect(m.openChats().length, 'restore must produce at least one chat').toBe(1);
+    expect(m.openChats().length).toBe(1);
     const restored = m.openChats()[0]!;
-    expect(restored.sessionId).toBe(expectedSid);
-    // After restore, args use --resume <sid> (openChatFromSession path),
-    // proving the chat is treated as an existing session, not a blank one.
-    const ri = restored.args.indexOf('--resume');
-    expect(ri, 'restored chat must be spawned with --resume').toBeGreaterThanOrEqual(0);
-    expect(restored.args[ri + 1]).toBe(expectedSid);
+    expect(restored.sessionId).toBeUndefined();
+    // No --resume; the restored chat is a fresh claude.
+    expect(restored.args).not.toContain('--resume');
   });
 });
 

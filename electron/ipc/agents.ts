@@ -1,3 +1,5 @@
+import path from 'path';
+import { homedir } from 'os';
 import { isCommandOnPath } from '../platform.js';
 
 interface AgentDef {
@@ -12,54 +14,23 @@ interface AgentDef {
   prompt_ready_delay_ms?: number;
 }
 
-import path from 'path';
-import { homedir } from 'os';
 import { IS_WINDOWS } from '../platform.js';
 
-// One binary per Opus version. Empirically `--model <id>` on a single
-// shared CLI changed claude's TUI behaviour enough to make terminal
-// scrollback unreachable for users; the cleanest mitigation is to
-// install one CLI per supported model and select via PATH alone — no
-// `--model` flag. Users without the binary can grab it from
-// CLAUDE_DOWNLOAD_URLS below (UI exposes a "Download" button next to
-// each missing agent).
+// Default Windows claude binaries (user can override via custom agents).
+// Resolved against the actual user's home directory so the app ships
+// with working defaults regardless of who installed it.
 //
-// Layout convention (Windows):
-//   ~/.local/bin/claude.exe                          → 4.8 (npm latest install)
-//   ~/.local/bin/claude-4.7/claude.exe               → 4.7 (CLI 2.1.116)
-//   ~/AppData/Local/Microsoft/WinGet/Links/claude.exe → 4.6 (WinGet, CLI 2.1.101)
-const WIN_CLAUDE_48 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
-const WIN_CLAUDE_47 = IS_WINDOWS
-  ? path.join(homedir(), '.local', 'bin', 'claude-4.7', 'claude.exe')
-  : 'claude';
+// 4.7 path points at the standalone CLI exe in ~/.local/bin — that's
+// the same path the old (pre-Opus-4.8) builds used and the one the user
+// confirmed launches on their Windows. The npm-installed .cmd wrapper
+// turned out to ship an incompatible standalone exe on some Windows
+// versions ("не совместима с версией Windows") and was reverted.
+const WIN_CLAUDE_47 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
 const WIN_CLAUDE_46 = IS_WINDOWS
   ? path.join(homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe')
   : 'claude';
 
-/**
- * Official tarball URLs for each Opus version's Claude Code CLI. Used by
- * the Agents view to offer a one-click "Download" when a binary is
- * missing. Anyone — not just the original author — can fetch these
- * because they're the npm public registry, no auth.
- */
-export const CLAUDE_DOWNLOAD_URLS: Record<string, string | null> = {
-  'claude-opus-4-8': null, // latest — install via `npm i -g @anthropic-ai/claude-code`
-  'claude-opus-4-7':
-    'https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.116.tgz',
-  'claude-opus-4-6':
-    'https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.101.tgz',
-};
-
 const DEFAULT_AGENTS: AgentDef[] = [
-  {
-    id: 'claude-opus-4-8',
-    name: 'Claude Code (Opus 4.8)',
-    command: IS_WINDOWS ? WIN_CLAUDE_48 : 'claude',
-    args: [],
-    resume_args: ['--continue'],
-    skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.157+ — Opus 4.8 (default install at ~/.local/bin/claude.exe)',
-  },
   {
     id: 'claude-opus-4-7',
     name: 'Claude Code (Opus 4.7)',
@@ -67,7 +38,7 @@ const DEFAULT_AGENTS: AgentDef[] = [
     args: [],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.116 — Opus 4.7 (install via Download button)',
+    description: 'Claude Code 2.1.116 — supports Opus 4.7 and Sonnet 4.6',
   },
   {
     id: 'claude-opus-4-6',
@@ -76,7 +47,7 @@ const DEFAULT_AGENTS: AgentDef[] = [
     args: [],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.101 — Opus 4.6 (WinGet install)',
+    description: 'Claude Code 2.1.101 — legacy CLI required for Opus 4.6',
   },
   {
     id: 'claude-code',

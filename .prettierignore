@@ -16,3 +16,4 @@ package-lock.json
 *.dmg
 test-results/
 playwright-report/
+playwright-out.json

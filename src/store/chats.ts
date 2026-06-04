@@ -290,7 +290,7 @@ export function openFreshChat(params: {
   title?: string;
   projectId?: string | null;
 }): Chat | null {
-  const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-8');
+  const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-7');
   if (!baseAgent) {
     console.error('[chats] no Claude agent available');
     return null;

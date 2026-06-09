@@ -26,5 +26,8 @@ docs/*
 
 # Playwright test artifacts
 test-results/
+test-results-final/
+test-results-html/
+test-results-json/
 playwright-report/
 playwright-full.log

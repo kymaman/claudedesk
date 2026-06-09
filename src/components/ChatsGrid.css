@@ -126,6 +126,16 @@
   cursor: text;
 }
 
+.chat-tile__fork {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent);
+  cursor: help;
+  /* nudge the glyph so it sits centred next to the title */
+  transform: translateY(0.5px);
+}
+
 .chat-tile__agent {
   font-size: 9px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);

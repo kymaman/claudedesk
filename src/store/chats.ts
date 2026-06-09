@@ -51,6 +51,12 @@ export interface Chat {
   /** Marked true when user closes the tab — kept in the array briefly so we
    *  can animate out, then pruned. */
   closed: boolean;
+  /** Fork lineage: when this chat was created via branch/fork (claude
+   *  `--fork-session`), records the session it was forked FROM so the
+   *  user can see "⑂ from <parent>" and understand the relationship.
+   *  Absent for non-forked chats. Captured deterministically at branch
+   *  time (we know the parent then) and persisted across restarts. */
+  forkParent?: { sessionId: string; title: string };
 }
 
 type RootSig<T> = [Accessor<T>, Setter<T>];
@@ -120,6 +126,16 @@ export const activeChatId = _activeChatId;
  */
 export function titleFor(chat: Pick<Chat, 'id' | 'title'>): string {
   return _titleOverrides().get(chat.id) ?? chat.title;
+}
+
+/**
+ * Returns ONLY a manual rename override for a chat, or undefined when
+ * the chat has never been renamed. Reactive. Used by the History
+ * overlay so a user's explicit rename — but NOT a possibly-stale base
+ * title — wins over the freshly-parsed disk title.
+ */
+export function titleOverrideFor(chatId: string): string | undefined {
+  return _titleOverrides().get(chatId);
 }
 
 /**
@@ -203,6 +219,7 @@ function buildChat(params: {
   args: string[];
   settings: ChatLaunchSettings;
   projectId?: string | null;
+  forkParent?: { sessionId: string; title: string };
 }): Chat {
   const now = Date.now();
   const chat: Chat = {
@@ -219,6 +236,7 @@ function buildChat(params: {
     createdAt: now,
     lastActiveAt: now,
     closed: false,
+    ...(params.forkParent ? { forkParent: params.forkParent } : {}),
   };
   _setChats((prev) => [...prev, chat]);
   _lastActiveAtById.set(chat.id, now);
@@ -250,8 +268,26 @@ export function openChatFromSession(
       !c.closed && c.sessionId === session.sessionId && (c.projectId ?? null) === targetProjectId,
   );
   if (existing) {
+    // Title-sync: the row the user just clicked carries the freshest
+    // title (re-parsed from JSONL, alias-aware). A tile opened earlier
+    // — especially one restored from persistence — may still show a
+    // stale title (old boilerplate, pre-rename). Without this update
+    // the user clicks "Fix scroll bug" but the focused tile header
+    // still says "session a1b2c3d4" — the exact "I click one session,
+    // the top shows another" complaint.
+    //
+    // We only refresh the BASE title; a user's manual rename lives in
+    // _titleOverrides and is intentionally left untouched (titleFor
+    // prefers the override).
+    if (session.title && existing.title !== session.title) {
+      _setChats((prev) =>
+        prev.map((c) => (c.id === existing.id ? { ...c, title: session.title } : c)),
+      );
+      schedulePersistOpenChats();
+    }
     setActiveChatId(existing.id);
-    return existing;
+    // Return the updated reference so callers see the new title.
+    return _chats().find((c) => c.id === existing.id) ?? existing;
   }
 
   const args = [
@@ -425,6 +461,7 @@ export function branchChat(chatId: string): Chat | null {
     createdAt: now,
     lastActiveAt: now,
     closed: false,
+    forkParent: { sessionId: src.sessionId, title: baseTitle },
   };
 
   // Insert right after the source so the two tiles sit side-by-side in
@@ -465,15 +502,17 @@ export function branchChatFromSession(
     ...(settings.skipPermissions ? baseAgent.skip_permissions_args : []),
     ...settings.extraFlags,
   ];
+  const parentTitle = session.title || session.sessionId.slice(0, 8);
   return buildChat({
     id: crypto.randomUUID(),
     sessionId: session.sessionId,
-    title: `${session.title || session.sessionId.slice(0, 8)} • branch`,
+    title: `${parentTitle} • branch`,
     cwd: session.projectPath,
     baseAgent,
     args,
     settings,
     projectId: options.projectId ?? null,
+    forkParent: { sessionId: session.sessionId, title: parentTitle },
   });
 }
 
@@ -490,6 +529,19 @@ export function renameChat(chatId: string, title: string): void {
   // persistence (and any non-titleFor reader) sees it.
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
   schedulePersistOpenChats();
+
+  // Persist the rename as a session ALIAS so it survives after the
+  // chat is closed AND becomes findable in History search. Without
+  // this, renaming a tile "миграция HH" only lived in localStorage —
+  // History still indexed the stale first-message title, so searching
+  // "HH" never matched. Fire-and-forget; the History overlay shows it
+  // immediately for open chats, and the alias makes it permanent.
+  const chat = _chats().find((c) => c.id === chatId);
+  if (chat?.sessionId && typeof window !== 'undefined') {
+    invoke(IPC.RenameClaudeSession, { sessionId: chat.sessionId, alias: title }).catch((err) => {
+      console.warn('[renameChat] failed to persist session alias:', err);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +580,9 @@ interface PersistedChat {
    *  alone scrambled the layout (bug #34). Older snapshots without this
    *  field fall back to lastActiveAt-ascending. */
   gridIndex?: number;
+  /** Fork lineage — preserved across restarts so the "⑂ from X" badge
+   *  survives a quit/relaunch. */
+  forkParent?: { sessionId: string; title: string };
 }
 
 /** Snapshot non-project chats to localStorage. Debounced via the createEffect
@@ -551,6 +606,7 @@ function persistOpenChats(): void {
         lastActiveAt: lastActiveAtFor(c),
         createdAt: c.createdAt,
         gridIndex: i,
+        ...(c.forkParent ? { forkParent: c.forkParent } : {}),
       }))
       .slice(0, MAX_PERSISTED);
     localStorage.setItem(PERSIST_KEY, JSON.stringify(snapshot));
@@ -654,6 +710,7 @@ export function restoreOpenChats(): void {
       extraFlags: p.extraFlags ?? [],
       skipPermissions: p.skipPermissions ?? false,
     };
+    let restoredChat: Chat | null = null;
     if (p.sessionId) {
       // Synthesize the minimal SessionItem shape openChatFromSession wants.
       // We don't have the full original record (folderIds, date, etc.)
@@ -666,9 +723,9 @@ export function restoreOpenChats(): void {
         filePath: '',
         folderIds: [],
       };
-      openChatFromSession(fakeSession, settings);
+      restoredChat = openChatFromSession(fakeSession, settings);
     } else {
-      openFreshChat({
+      restoredChat = openFreshChat({
         id: p.id,
         cwd: p.cwd,
         agentId: p.agentDefId,
@@ -676,6 +733,14 @@ export function restoreOpenChats(): void {
         extraFlags: p.extraFlags ?? [],
         skipPermissions: p.skipPermissions ?? false,
       });
+    }
+    // Re-apply fork lineage so the "⑂ from X" badge survives restart.
+    if (restoredChat && p.forkParent) {
+      const fp = p.forkParent;
+      _setChats((prev) =>
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- restoredChat asserted non-null in caller scope above
+        prev.map((c) => (c.id === restoredChat!.id ? { ...c, forkParent: fp } : c)),
+      );
     }
   }
   // Restore focus to the most-recently-used chat — independent of grid

@@ -132,6 +132,7 @@ export enum IPC {
   // Sessions history
   ListClaudeSessions = 'list_claude_sessions',
   GetClaudeSessionPreview = 'get_claude_session_preview',
+  LoadSessionTranscript = 'load_session_transcript',
   RenameClaudeSession = 'rename_claude_session',
 
   // Folders

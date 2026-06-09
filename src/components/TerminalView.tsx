@@ -16,6 +16,7 @@ import { store, setTaskLastInputAt } from '../store/store';
 import { terminalDefaults } from '../store/terminal-defaults';
 import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
 import { listenXtermBridge } from '../lib/xterm-bridge';
+import { classifyInjectedText } from '../lib/injected-text';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import type { PtyOutput } from '../ipc/types';
 
@@ -127,6 +128,12 @@ export function TerminalView(props: TerminalViewProps) {
       theme: getTerminalTheme(store.themePreset),
       allowProposedApi: true,
       scrollback: TERMINAL_SCROLLBACK_LINES,
+      // Wheel ticks default to 1 line each — user reported "scrollback
+      // only moves a tiny bit". 5/15 gives ~5 lines per normal tick and
+      // ~15 lines per Shift+wheel "fast scroll" tick, so a few spins
+      // walks ~hundreds of lines instead of ~tens.
+      scrollSensitivity: 5,
+      fastScrollSensitivity: 15,
     });
 
     fitAddon = new FitAddon();
@@ -499,16 +506,30 @@ export function TerminalView(props: TerminalViewProps) {
           // After xterm's keydown handler runs, value is normally
           // cleared synchronously. A persistent non-empty value (200ms
           // sample) means something else wrote it — Whisper, AHK,
-          // SendInput unicode mode, Wispr, etc.
+          // SendInput unicode mode, Wispr, paste-into-textarea, etc.
           const text = taEl.value;
           taEl.value = '';
-          // Skip single-char residue. xterm sometimes leaves the just-
-          // typed char in the helper textarea for a few ms (varies by
-          // browser/IME) — forwarding it duplicates the keystroke. The
-          // user reported this as "пробел ставится дважды". Wispr Flow
-          // and other dictation tools always inject phrases (≥2 chars),
-          // so a length-1 sample is unambiguously stray.
-          if (text.length <= 1) return;
+          // Decide delivery (see lib/injected-text.ts):
+          //   ignore — single-char residue (would double-type)
+          //   paste  — multi-line block: MUST go through term.paste so
+          //            it's bracketed-paste-wrapped. Forwarding raw
+          //            multi-line text sends each newline as Enter,
+          //            which makes claude submit the first line and
+          //            wipe the rest — the user's "paste erases the
+          //            previous block" bug.
+          //   type   — single-line dictation: forward raw.
+          const delivery = classifyInjectedText(text);
+          if (delivery === 'ignore') return;
+          if (delivery === 'paste') {
+            try {
+              term?.paste(text);
+              term?.focus();
+            } catch {
+              // term disposed mid-tick — raw enqueue so input isn't lost.
+              enqueueInput(text);
+            }
+            return;
+          }
           enqueueInput(text);
         }, 200)
       : undefined;
@@ -665,15 +686,41 @@ export function TerminalView(props: TerminalViewProps) {
 
     const onOutput = new Channel<PtyOutput>();
     let initialCommandSent = false;
+    // Holds PTY output bytes until the transcript has been written
+    // (or the safety timeout fired). For resumed chats we spawn PTY
+    // immediately to avoid a "black screen for several seconds"
+    // experience, but we don't want claude's banner to land in xterm
+    // BEFORE the transcript — that order is what makes the transcript
+    // appear above the banner in scrollback. So early bytes go to
+    // this buffer; once flushed the gate stays open and bytes flow
+    // straight to enqueueOutput.
+    let prePtyGateOpen = false;
+    const prePtyBuffer: Uint8Array[] = [];
+    function openPrePtyGate() {
+      if (prePtyGateOpen) return;
+      prePtyGateOpen = true;
+      while (prePtyBuffer.length > 0) {
+        const chunk = prePtyBuffer.shift();
+        if (chunk) enqueueOutput(chunk);
+      }
+    }
     onOutput.onmessage = (msg) => {
       if (msg.type === 'Data') {
-        enqueueOutput(base64ToUint8Array(msg.data));
+        const bytes = base64ToUint8Array(msg.data);
+        if (prePtyGateOpen) {
+          enqueueOutput(bytes);
+        } else {
+          prePtyBuffer.push(bytes);
+        }
         if (!initialCommandSent && props.initialCommand) {
           const cmd = props.initialCommand;
           initialCommandSent = true;
           setTimeout(() => enqueueInput(cmd + '\r'), 50);
         }
       } else if (msg.type === 'Exit') {
+        // On exit, always flush whatever's buffered so the user
+        // doesn't miss diagnostics.
+        openPrePtyGate();
         pendingExitPayload = msg.data;
         flushOutputQueue();
         if (!outputWriteInFlight && outputQueue.length === 0 && pendingExitPayload) {
@@ -847,6 +894,12 @@ export function TerminalView(props: TerminalViewProps) {
     }
     const decoder = new TextDecoder('utf-8', { fatal: false });
 
+    // Transcript pre-render disabled — claude's own TUI handles
+    // history display. Use PageUp inside claude's interactive scroll
+    // for previous messages. Gate opens immediately so PTY output
+    // flows straight to xterm without buffering.
+    queueMicrotask(openPrePtyGate);
+
     invoke(IPC.SpawnAgent, {
       taskId,
       agentId,
@@ -863,9 +916,9 @@ export function TerminalView(props: TerminalViewProps) {
       onOutput,
       // eslint-disable-next-line solid/reactivity -- promise catch handler reads current prop values intentionally
     }).catch((err) => {
-      // Strip control/escape characters to prevent terminal escape injection
       // eslint-disable-next-line no-control-regex -- intentionally stripping control/escape chars to prevent terminal injection
       const safeErr = String(err).replace(/[\x00-\x1f\x7f]/g, '');
+      openPrePtyGate();
       term?.write(`\x1b[31mFailed to spawn: ${safeErr}\x1b[0m\r\n`);
       props.onExit?.({
         exit_code: null,

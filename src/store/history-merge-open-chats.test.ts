@@ -150,4 +150,65 @@ describe('bug #35 — History shows OPEN chats with a sessionId without refresh'
     chats.renameChat(chat.id, 'renamed');
     expect(history.filteredSessions()[0]!.title).toBe('renamed');
   });
+
+  it('SEARCH finds an on-disk session by its open-tile rename (the "миграция HH" bug)', async () => {
+    const { chats, history } = await importBoth();
+    // Session exists on disk with its stale first-message title.
+    history.setSessions([
+      {
+        sessionId: RESUMED_SESSION.sessionId,
+        filePath: '/jsonl/p.jsonl',
+        projectPath: '/tmp/proj',
+        title: 'настрой как все в другом хермесе',
+        date: '2026-05-28',
+        folderIds: [],
+      },
+    ]);
+    // Open the same session and rename the tile to "миграция HH —".
+    const chat = chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    })!;
+    chats.renameChat(chat.id, 'миграция HH —');
+
+    // Display reflects the rename.
+    expect(history.filteredSessions()[0]!.title).toBe('миграция HH —');
+
+    // Searching "HH" must now find it (previously matched only the
+    // stale disk title and missed the rename entirely).
+    history.setSearchQuery('HH');
+    const hits = history.filteredSessions();
+    expect(hits.length).toBe(1);
+    expect(hits[0]!.sessionId).toBe(RESUMED_SESSION.sessionId);
+
+    // Case-insensitive too.
+    history.setSearchQuery('hh');
+    expect(history.filteredSessions().length).toBe(1);
+
+    history.setSearchQuery('');
+  });
+
+  it('a NON-renamed open chat does NOT override the fresh disk title', async () => {
+    const { chats, history } = await importBoth();
+    history.setSessions([
+      {
+        sessionId: RESUMED_SESSION.sessionId,
+        filePath: '/jsonl/p.jsonl',
+        projectPath: '/tmp/proj',
+        title: 'real-on-disk',
+        date: '2026-05-28',
+        folderIds: ['f1'],
+      },
+    ]);
+    chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    // No rename → disk title wins, folderIds preserved.
+    const visible = history.filteredSessions();
+    expect(visible[0]!.title).toBe('real-on-disk');
+    expect(visible[0]!.folderIds).toEqual(['f1']);
+  });
 });

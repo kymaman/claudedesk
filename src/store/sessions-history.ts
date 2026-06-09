@@ -13,7 +13,7 @@
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { filterState } from './session-filters';
 import { hiddenSessions } from './session-hide';
-import { openChats, titleFor } from './chats';
+import { openChats, titleFor, titleOverrideFor } from './chats';
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from electron/ipc/session-history.ts)
@@ -124,9 +124,21 @@ export function smartProjectGroups(): { projectPath: string; basename: string; c
 function sessionsWithOpenChats(): SessionItem[] {
   const disk = sessions();
   const known = new Set(disk.map((s) => s.sessionId));
+
+  // Map sessionId → the user's MANUAL rename override (if any). We
+  // overlay this onto the matching disk session so History display AND
+  // search use the title the user actually gave the tile — otherwise a
+  // tile renamed "миграция HH" stays findable only by its stale
+  // first-message title, and searching "HH" misses it entirely. We use
+  // the override (not the base title) so a non-renamed open chat still
+  // lets the freshly-parsed disk title win.
+  const renameById = new Map<string, string>();
   const ephemeral: SessionItem[] = [];
   for (const c of openChats()) {
-    if (!c.sessionId || known.has(c.sessionId)) continue;
+    if (!c.sessionId) continue;
+    const override = titleOverrideFor(c.id);
+    if (override) renameById.set(c.sessionId, override);
+    if (known.has(c.sessionId)) continue;
     ephemeral.push({
       sessionId: c.sessionId,
       filePath: '',
@@ -138,7 +150,17 @@ function sessionsWithOpenChats(): SessionItem[] {
       folderIds: [],
     });
   }
-  return ephemeral.length === 0 ? disk : [...disk, ...ephemeral];
+
+  // Overlay manual renames onto on-disk sessions.
+  const overlaid =
+    renameById.size === 0
+      ? disk
+      : disk.map((s) => {
+          const t = renameById.get(s.sessionId);
+          return t && t !== s.title ? { ...s, title: t } : s;
+        });
+
+  return ephemeral.length === 0 ? overlaid : [...overlaid, ...ephemeral];
 }
 
 export function filteredSessions(): SessionItem[] {

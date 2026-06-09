@@ -187,6 +187,17 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
         onContextMenu={onHeadContextMenu}
         title="Drag to reorder · double-click title to rename · right-click for menu"
       >
+        <Show when={props.chat.forkParent}>
+          {(fp) => (
+            <span
+              class="chat-tile__fork"
+              title={`Forked from: ${fp().title}`}
+              aria-label={`Forked from ${fp().title}`}
+            >
+              ⑂
+            </span>
+          )}
+        </Show>
         <span class="chat-tile__title" title={props.chat.cwd} onDblClick={onRename}>
           {titleFor(props.chat)}
         </span>

@@ -91,6 +91,7 @@ import {
   pinFolder,
   deleteSessionFile,
 } from './session-history.js';
+import { loadSessionTranscript } from './session-transcript.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
 import {
@@ -967,6 +968,15 @@ export function registerAllHandlers(win: BrowserWindow): void {
     channel: IPC.RenameClaudeSession,
     schema: { sessionId: 'string', alias: 'string' },
     handler: ({ sessionId, alias }) => renameSession(sessionId, alias),
+  });
+
+  ipcMain.handle(IPC.LoadSessionTranscript, (_e, args) => {
+    const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : undefined;
+    const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined;
+    return loadSessionTranscript({
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(filePath !== undefined ? { filePath } : {}),
+    });
   });
 
   // --- Folders (History view organization) ---

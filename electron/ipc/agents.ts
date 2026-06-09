@@ -20,31 +20,50 @@ import { IS_WINDOWS } from '../platform.js';
 // Resolved against the actual user's home directory so the app ships
 // with working defaults regardless of who installed it.
 //
-// 4.7 path points at the standalone CLI exe in ~/.local/bin — that's
-// the same path the old (pre-Opus-4.8) builds used and the one the user
-// confirmed launches on their Windows. The npm-installed .cmd wrapper
-// turned out to ship an incompatible standalone exe on some Windows
-// versions ("не совместима с версией Windows") and was reverted.
-const WIN_CLAUDE_47 = IS_WINDOWS ? path.join(homedir(), '.local', 'bin', 'claude.exe') : 'claude';
+// `.local/bin/claude.exe` is the modern claude CLI 2.1.162 — supports
+// Opus 4.8 via `--model claude-opus-4-8`. Its TUI uses the alt-screen
+// buffer, so scrollback in xterm.js v5 is empty by default; we mitigate
+// that with the AltScreenStripper in the PTY pipeline (see
+// strip-alt-screen.ts + agentSpawn integration), which makes claude
+// redraw into the normal buffer so old frames land in scrollback.
+//
+// `claude-4.7/claude.exe` is claude CLI 2.1.116 pinned for users who
+// still want Opus 4.7 (the only version available on 2.1.116). The
+// WinGet path is the legacy 2.1.101 binary that still works for 4.6.
+const WIN_CLAUDE_MODERN = IS_WINDOWS
+  ? path.join(homedir(), '.local', 'bin', 'claude.exe')
+  : 'claude';
+const WIN_CLAUDE_47 = IS_WINDOWS
+  ? path.join(homedir(), '.local', 'bin', 'claude-4.7', 'claude.exe')
+  : 'claude';
 const WIN_CLAUDE_46 = IS_WINDOWS
   ? path.join(homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe')
   : 'claude';
 
 const DEFAULT_AGENTS: AgentDef[] = [
   {
+    id: 'claude-opus-4-8',
+    name: 'Claude Code (Opus 4.8)',
+    command: IS_WINDOWS ? WIN_CLAUDE_MODERN : 'claude',
+    args: ['--remote-control', '--model', 'claude-opus-4-8'],
+    resume_args: ['--continue'],
+    skip_permissions_args: ['--dangerously-skip-permissions'],
+    description: 'Claude Code 2.1.162 — Opus 4.8 (latest)',
+  },
+  {
     id: 'claude-opus-4-7',
     name: 'Claude Code (Opus 4.7)',
     command: IS_WINDOWS ? WIN_CLAUDE_47 : 'claude',
-    args: [],
+    args: ['--remote-control'],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
-    description: 'Claude Code 2.1.116 — supports Opus 4.7 and Sonnet 4.6',
+    description: 'Claude Code 2.1.116 — Opus 4.7 / Sonnet 4.6',
   },
   {
     id: 'claude-opus-4-6',
     name: 'Claude Code (Opus 4.6)',
     command: IS_WINDOWS ? WIN_CLAUDE_46 : 'claude',
-    args: [],
+    args: ['--remote-control'],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
     description: 'Claude Code 2.1.101 — legacy CLI required for Opus 4.6',
@@ -53,7 +72,7 @@ const DEFAULT_AGENTS: AgentDef[] = [
     id: 'claude-code',
     name: 'Claude Code (system)',
     command: 'claude',
-    args: [],
+    args: ['--remote-control'],
     resume_args: ['--continue'],
     skip_permissions_args: ['--dangerously-skip-permissions'],
     description: "Whichever 'claude' resolves on PATH",

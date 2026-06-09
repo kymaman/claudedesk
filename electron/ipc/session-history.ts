@@ -11,6 +11,11 @@ import readline from 'readline';
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import { getClaudeProjectsDir, getSessionAliasesDbPath } from '../paths.js';
+import {
+  isNoiseUserText,
+  pickSessionTitle,
+  looksLikeStaleBoilerplateTitle,
+} from './session-title.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -512,11 +517,15 @@ interface ExtractedSummary {
 }
 
 async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
+  const sessionId = path.basename(filePath, '.jsonl');
   return new Promise((resolve) => {
     const result: ExtractedSummary = { title: null, summary: null, cwd: null };
     let count = 0;
     let summaryFromIndex: string | null = null;
-    let firstUserText: string | null = null;
+    // Collect the first several user texts so we can skip continuation
+    // boilerplate (see session-title.ts) and pick the first REAL prompt.
+    const userTexts: string[] = [];
+    const MAX_USER_TEXTS = 6;
     let cwd: string | null = null;
     let stream: fs.ReadStream;
     try {
@@ -530,12 +539,17 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
     const finish = () => {
       rl.removeAllListeners();
       stream.destroy();
-      if (summaryFromIndex) {
+      if (summaryFromIndex && !isNoiseUserText(summaryFromIndex)) {
         result.title = summaryFromIndex.slice(0, 80);
         result.summary = summaryFromIndex.slice(0, 240);
-      } else if (firstUserText) {
-        result.title = firstUserText.slice(0, 80);
-        result.summary = firstUserText.slice(0, 240);
+      } else {
+        // Skip continuation boilerplate / caveat blocks and use the
+        // first real user prompt as the title.
+        const picked = pickSessionTitle(userTexts, sessionId);
+        if (picked) {
+          result.title = picked.title;
+          result.summary = picked.summary;
+        }
       }
       result.cwd = cwd;
       resolve(result);
@@ -570,9 +584,16 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
         }
         if (obj.type === 'user' && !obj.isMeta && obj.message?.role === 'user') {
           const text = extractUserText(obj.message.content);
-          if (text && !firstUserText) {
-            firstUserText = text;
-            if (cwd && count > 4) {
+          if (text && userTexts.length < MAX_USER_TEXTS) {
+            userTexts.push(text);
+            // Finish once we have a non-noise prompt AND cwd, or once
+            // we've gathered enough candidates to make a decision.
+            const haveReal = userTexts.some((t) => !isNoiseUserText(t));
+            if (haveReal && cwd && count > 4) {
+              finish();
+              return;
+            }
+            if (userTexts.length >= MAX_USER_TEXTS && cwd) {
               finish();
               return;
             }
@@ -637,7 +658,11 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
     // Cache by mtime so we only pay the read once.
     const mtimeMs = raw.mtime.getTime();
     let cached = getCachedSummary(raw.sessionId);
-    if (!cached || cached.mtime_ms !== mtimeMs) {
+    // Heal previously-cached boilerplate titles: if the stored title is
+    // a continuation banner, re-parse with the current logic even when
+    // mtime is unchanged (one-time migration on first listing).
+    const staleTitle = cached ? looksLikeStaleBoilerplateTitle(cached.title) : false;
+    if (!cached || cached.mtime_ms !== mtimeMs || staleTitle) {
       const extracted = await parseJsonlSummary(raw.filePath);
       setCachedSummary(
         raw.sessionId,

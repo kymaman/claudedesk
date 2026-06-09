@@ -149,4 +149,39 @@ describe('openChatFromSession — dedup behaviour', () => {
     // Still only one open tile.
     expect(chats().filter((c) => !c.closed).length).toBe(1);
   });
+
+  it('dedup refreshes the existing tile title to the freshly-clicked row (mismatch fix)', async () => {
+    const { openChatFromSession, chats, titleFor } = await importChats();
+
+    // Tile opened earlier with a stale title (e.g. restored from
+    // persistence before the title was re-derived).
+    const stale: SessionItem = { ...SESSION, title: 'session sess-123' };
+    const first = openChatFromSession(stale, SETTINGS);
+    expect(first).toBeTruthy();
+    expect(titleFor(chats().find((c) => c.id === first!.id)!)).toBe('session sess-123');
+
+    // User clicks the same session in History — now showing the fresh
+    // re-parsed title. Dedup must focus the same tile AND update its
+    // header so it matches what the user clicked.
+    const fresh: SessionItem = { ...SESSION, title: 'Fix the scroll bug' };
+    const second = openChatFromSession(fresh, SETTINGS);
+    expect(second!.id).toBe(first!.id);
+    expect(titleFor(chats().find((c) => c.id === first!.id)!)).toBe('Fix the scroll bug');
+  });
+
+  it('dedup does NOT clobber a user manual rename (override wins)', async () => {
+    const { openChatFromSession, chats, renameChat, titleFor } = await importChats();
+
+    const first = openChatFromSession({ ...SESSION, title: 'orig' }, SETTINGS);
+    expect(first).toBeTruthy();
+    // User manually renames the tile.
+    renameChat(first!.id, 'My custom name');
+    expect(titleFor(chats().find((c) => c.id === first!.id)!)).toBe('My custom name');
+
+    // Re-click with a different fresh title — the manual override must
+    // still win (titleFor prefers the override).
+    const second = openChatFromSession({ ...SESSION, title: 'auto title' }, SETTINGS);
+    expect(second!.id).toBe(first!.id);
+    expect(titleFor(chats().find((c) => c.id === first!.id)!)).toBe('My custom name');
+  });
 });

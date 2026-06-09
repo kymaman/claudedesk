@@ -118,6 +118,7 @@ const ALLOWED_CHANNELS = new Set([
   // Sessions history
   'list_claude_sessions',
   'get_claude_session_preview',
+  'load_session_transcript',
   'rename_claude_session',
   // Folders
   'list_folders',

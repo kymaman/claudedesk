@@ -152,6 +152,31 @@ describe('branchChat', () => {
     const branched = m.branchChat(src!.id);
     expect(branched!.title).toBe('Renamed source • branch');
   });
+
+  it('records fork lineage (forkParent) pointing at the source session', async () => {
+    const m = await importChats();
+    const src = m.openChatFromSession(SESSION, {
+      agentId: 'claude-opus-4-7',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    const branched = m.branchChat(src!.id);
+    expect(branched!.forkParent).toBeTruthy();
+    expect(branched!.forkParent!.sessionId).toBe(SESSION.sessionId);
+    expect(branched!.forkParent!.title).toBe(SESSION.title);
+  });
+
+  it('forkParent uses the renamed source title, not the stale one', async () => {
+    const m = await importChats();
+    const src = m.openChatFromSession(SESSION, {
+      agentId: 'claude-opus-4-7',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    m.renameChat(src!.id, 'Renamed source');
+    const branched = m.branchChat(src!.id);
+    expect(branched!.forkParent!.title).toBe('Renamed source');
+  });
 });
 
 describe('branchChatFromSession', () => {
@@ -177,5 +202,17 @@ describe('branchChatFromSession', () => {
     expect(branched!.id).not.toBe(first!.id);
     expect(m.openChats().length).toBe(2);
     expect(branched!.args).toContain('--fork-session');
+  });
+
+  it('records fork lineage on the branched-from-session chat', async () => {
+    const m = await importChats();
+    const branched = m.branchChatFromSession(SESSION, {
+      agentId: 'claude-opus-4-7',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    expect(branched!.forkParent).toBeTruthy();
+    expect(branched!.forkParent!.sessionId).toBe(SESSION.sessionId);
+    expect(branched!.forkParent!.title).toBe(SESSION.title);
   });
 });

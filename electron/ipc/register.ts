@@ -88,10 +88,12 @@ import {
   removeSessionFromFolder,
   getLaunchSettings,
   setLaunchSettings,
+  deleteLaunchSettings,
   pinFolder,
   deleteSessionFile,
 } from './session-history.js';
 import { loadSessionTranscript } from './session-transcript.js';
+import { summarizeSession } from './session-summarize.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
 import {
@@ -979,6 +981,16 @@ export function registerAllHandlers(win: BrowserWindow): void {
     });
   });
 
+  ipcMain.handle(IPC.SummarizeSession, (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined;
+    return summarizeSession({
+      sessionId: args.sessionId as string,
+      ...(filePath !== undefined ? { filePath } : {}),
+      force: Boolean(args?.force),
+    });
+  });
+
   // --- Folders (History view organization) ---
   ipcMain.handle(IPC.ListFolders, () => listFolders());
 
@@ -1029,6 +1041,12 @@ export function registerAllHandlers(win: BrowserWindow): void {
       extraFlags,
       skipPermissions: Boolean(args.skipPermissions),
     });
+  });
+
+  registerHandler<{ sessionId: string }>({
+    channel: IPC.DeleteLaunchSettings,
+    schema: { sessionId: 'string' },
+    handler: ({ sessionId }) => deleteLaunchSettings(sessionId),
   });
 
   ipcMain.handle(IPC.PinFolder, (_e, args) => {

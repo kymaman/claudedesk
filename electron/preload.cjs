@@ -119,6 +119,7 @@ const ALLOWED_CHANNELS = new Set([
   'list_claude_sessions',
   'get_claude_session_preview',
   'load_session_transcript',
+  'summarize_session',
   'rename_claude_session',
   // Folders
   'list_folders',
@@ -130,6 +131,7 @@ const ALLOWED_CHANNELS = new Set([
   // Launch settings
   'get_launch_settings',
   'set_launch_settings',
+  'delete_launch_settings',
   // Folder pin
   'pin_folder',
   // Delete session file

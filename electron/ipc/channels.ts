@@ -133,6 +133,7 @@ export enum IPC {
   ListClaudeSessions = 'list_claude_sessions',
   GetClaudeSessionPreview = 'get_claude_session_preview',
   LoadSessionTranscript = 'load_session_transcript',
+  SummarizeSession = 'summarize_session',
   RenameClaudeSession = 'rename_claude_session',
 
   // Folders
@@ -146,6 +147,7 @@ export enum IPC {
   // Launch settings
   GetLaunchSettings = 'get_launch_settings',
   SetLaunchSettings = 'set_launch_settings',
+  DeleteLaunchSettings = 'delete_launch_settings',
 
   // Folder pin
   PinFolder = 'pin_folder',

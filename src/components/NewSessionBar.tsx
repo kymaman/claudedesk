@@ -14,7 +14,7 @@ export function NewSessionBar() {
   const [open, setOpen] = createSignal(false);
   const [title, setTitle] = createSignal('');
   const [cwd, setCwd] = createSignal('');
-  const [agentId, setAgentId] = createSignal('claude-opus-4-7');
+  const [agentId, setAgentId] = createSignal('claude-opus-4-8');
   const [flags, setFlags] = createSignal('');
   const [skipPerms, setSkipPerms] = createSignal(false);
   const [busy, setBusy] = createSignal(false);

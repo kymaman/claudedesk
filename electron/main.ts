@@ -1,6 +1,7 @@
 import { app, BrowserWindow, session, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { registerAllHandlers } from './ipc/register.js';
@@ -76,6 +77,26 @@ function fixEnv(): void {
 }
 
 fixEnv();
+
+// E2E isolation: Playwright launches set CLAUDEDESK_E2E=1. Point
+// userData at a throwaway temp dir so test runs NEVER touch the real
+// app state (open-chat persistence, aliases DB, workspaces DB,
+// localStorage). Without this, every e2e spec leaked its open chats
+// into the user's real app AND into the next spec's launch — tiles
+// accumulated across launches until the 12-per-window cap, after which
+// "Resume" opened a second window and specs failed with ".chat-tile
+// never appeared". Must run before app.getPath('userData') is read.
+if (process.env.CLAUDEDESK_E2E === '1') {
+  const e2eUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'claudedesk-e2e-'));
+  app.setPath('userData', e2eUserData);
+  app.on('quit', () => {
+    try {
+      fs.rmSync(e2eUserData, { recursive: true, force: true });
+    } catch {
+      /* temp dir cleanup is best-effort */
+    }
+  });
+}
 
 // Verify that preload.cjs ALLOWED_CHANNELS stays in sync with the IPC enum.
 // Logs a warning in dev if they drift — catches mismatches before they hit users.

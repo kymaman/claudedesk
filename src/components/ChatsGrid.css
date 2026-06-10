@@ -174,3 +174,20 @@
   min-width: 0;
   overflow: hidden;
 }
+
+/* Inline title editor — replaces the old window.prompt rename (modal
+   prompts are fragile in Electron). Mirrors .chat-tile__title metrics
+   so the head doesn't jump when editing starts. */
+.chat-tile__title-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.18));
+  border-radius: 3px;
+  padding: 0 4px;
+  outline: none;
+}

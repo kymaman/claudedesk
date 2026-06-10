@@ -133,12 +133,22 @@ function sessionsWithOpenChats(): SessionItem[] {
   // the override (not the base title) so a non-renamed open chat still
   // lets the freshly-parsed disk title win.
   const renameById = new Map<string, string>();
+  // sessionId → ISO datetime the chat tile was opened. Overlaid onto the
+  // matching disk session's date so OPENING a chat bumps it to the top
+  // of the "newest" sort IMMEDIATELY (openChats() is reactive) — not
+  // after an app restart. Disk dates are bare "YYYY-MM-DD" (mtime), so
+  // a full ISO datetime compares above every same-day disk session.
+  const openedAtById = new Map<string, string>();
   const ephemeral: SessionItem[] = [];
   for (const c of openChats()) {
     if (!c.sessionId) continue;
     const override = titleOverrideFor(c.id);
     if (override) renameById.set(c.sessionId, override);
-    if (known.has(c.sessionId)) continue;
+    const openedAt = new Date(c.createdAt).toISOString();
+    if (known.has(c.sessionId)) {
+      openedAtById.set(c.sessionId, openedAt);
+      continue;
+    }
     ephemeral.push({
       sessionId: c.sessionId,
       filePath: '',
@@ -146,18 +156,23 @@ function sessionsWithOpenChats(): SessionItem[] {
       title: titleFor(c),
       // Use ISO date so sort:newest places fresh chats above older disk
       // sessions — matches the "just opened" feel.
-      date: new Date(c.createdAt).toISOString(),
+      date: openedAt,
       folderIds: [],
     });
   }
 
-  // Overlay manual renames onto on-disk sessions.
+  // Overlay manual renames + open-bump dates onto on-disk sessions.
   const overlaid =
-    renameById.size === 0
+    renameById.size === 0 && openedAtById.size === 0
       ? disk
       : disk.map((s) => {
           const t = renameById.get(s.sessionId);
-          return t && t !== s.title ? { ...s, title: t } : s;
+          const openedAt = openedAtById.get(s.sessionId);
+          // Bump only forward in time — an old still-open tile must not
+          // sink a session that something updated more recently.
+          const date = openedAt && openedAt > s.date ? openedAt : s.date;
+          if ((!t || t === s.title) && date === s.date) return s;
+          return { ...s, title: t ?? s.title, date };
         });
 
   return ephemeral.length === 0 ? overlaid : [...overlaid, ...ephemeral];
@@ -225,6 +240,7 @@ export {
   loadSessions,
   renameSessionLocal,
   fetchSessionPreview,
+  summarizeSessionAction,
   loadFolders,
   createFolderAction,
   renameFolderAction,

@@ -15,8 +15,10 @@ import { matchesKeyEvent } from '../lib/keybindings';
 import { store, setTaskLastInputAt } from '../store/store';
 import { terminalDefaults } from '../store/terminal-defaults';
 import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
+import { filterArgsBySupport } from '../lib/agent-args-filter';
 import { listenXtermBridge } from '../lib/xterm-bridge';
 import { classifyInjectedText } from '../lib/injected-text';
+import { resolveFileLink } from '../lib/file-link-resolve';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import type { PtyOutput } from '../ipc/types';
 
@@ -187,9 +189,32 @@ export function TerminalView(props: TerminalViewProps) {
     };
     containerRef.addEventListener('dragover', onContainerDragOver);
     containerRef.addEventListener('drop', onContainerDrop);
+
+    // Whisper-Flow-style dictation tools inject text by dispatching a
+    // SYNTHETIC `paste` ClipboardEvent on the focused helper-textarea.
+    // xterm only wires its paste pipeline to REAL clipboard events, so
+    // synthetic ones silently vanished (dictation reached Telegram /
+    // notes apps but never our PTY). Forward them ourselves. Real
+    // Ctrl+V pastes are handled (and preventDefault-ed) by xterm before
+    // bubbling here — the defaultPrevented guard makes double-pasting
+    // impossible.
+    const onContainerPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return;
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text) return;
+      e.preventDefault();
+      try {
+        term?.paste(text);
+      } catch {
+        /* terminal disposed */
+      }
+    };
+    containerRef.addEventListener('paste', onContainerPaste);
+
     onCleanup(() => {
       containerRef.removeEventListener('dragover', onContainerDragOver);
       containerRef.removeEventListener('drop', onContainerDrop);
+      containerRef.removeEventListener('paste', onContainerPaste);
     });
 
     // File path link provider — makes file paths clickable in terminal output
@@ -232,8 +257,7 @@ export function TerminalView(props: TerminalViewProps) {
               if (!modifierHeld) return;
               // Strip line:col suffix for opening
               const filePath = link.text.replace(/:\d+(:\d+)?$/, '');
-              // Resolve relative paths against the task's working directory
-              const resolved = filePath.startsWith('/') ? filePath : `${props.cwd}/${filePath}`;
+              const resolved = resolveFileLink(filePath, props.cwd);
               // .md files open in viewer; Shift held = open externally instead
               if (/\.md$/i.test(resolved) && props.onFileLink && !event.shiftKey) {
                 props.onFileLink(resolved);
@@ -859,7 +883,15 @@ export function TerminalView(props: TerminalViewProps) {
     // so the user isn't prompted "Trust this folder?" on every resume.
     const autoFlags =
       store.autoTrustFolders && commandLooksClaude ? ['--dangerously-skip-permissions'] : [];
-    const mergedArgs = mergeSpawnArgs(props.args, defaults.flags, autoFlags);
+    const rawArgs = mergeSpawnArgs(props.args, defaults.flags, autoFlags);
+    // Filter out flags the resolved claude binary's --help doesn't list,
+    // so a future CLI update that drops e.g. --remote-control doesn't
+    // crash spawn. Capabilities come from listAgents() probing the bin.
+    const agentDef = store.availableAgents.find((a) => a.id === props.agentId);
+    const supportedFlags = agentDef?.capabilities
+      ? new Set(agentDef.capabilities.supportedFlags)
+      : undefined;
+    const mergedArgs = commandLooksClaude ? filterArgsBySupport(rawArgs, supportedFlags) : rawArgs;
     const mergedEnv = mergeSpawnEnv(defaults, props.env);
 
     // Belt-and-braces fallback: some Claude variants still show the interactive
@@ -894,11 +926,51 @@ export function TerminalView(props: TerminalViewProps) {
     }
     const decoder = new TextDecoder('utf-8', { fatal: false });
 
-    // Transcript pre-render disabled — claude's own TUI handles
-    // history display. Use PageUp inside claude's interactive scroll
-    // for previous messages. Gate opens immediately so PTY output
-    // flows straight to xterm without buffering.
-    queueMicrotask(openPrePtyGate);
+    // Transcript pre-fill for resumed claude chats. claude --resume
+    // does NOT replay conversation history (verified empirically on
+    // 2.1.116 and 2.1.162: <1KB banner + trust prompt, then idle), so
+    // after an app restart every resumed tile would show an empty
+    // scrollback. We render the session JSONL into claude-native-style
+    // text (●/⎿/❯ — see electron/ipc/session-transcript.ts) and write
+    // it into xterm BEFORE the first PTY byte; the prePtyGate holds
+    // claude's banner until the transcript landed. The claude TUI
+    // itself is untouched — we only pre-seed xterm's scrollback.
+    const resumeIdx = mergedArgs.indexOf('--resume');
+    const resumeCandidate = resumeIdx >= 0 ? mergedArgs[resumeIdx + 1] : undefined;
+    const resumeSessionId =
+      commandLooksClaude &&
+      !props.isShell &&
+      resumeCandidate &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resumeCandidate)
+        ? resumeCandidate
+        : undefined;
+    if (resumeSessionId) {
+      // Safety valve: never hold PTY output hostage if the transcript
+      // IPC stalls (huge JSONL, slow disk) — open the gate after 3s.
+      const gateTimer = window.setTimeout(openPrePtyGate, 3000);
+      invoke<string>(IPC.LoadSessionTranscript, { sessionId: resumeSessionId })
+        .then((transcript) => {
+          if (transcript && term && !prePtyGateOpen) {
+            // xterm serializes writes in call order, so opening the
+            // gate right after this write keeps PTY bytes below the
+            // transcript in scrollback.
+            try {
+              term.write(transcript + '\r\n');
+            } catch {
+              /* terminal disposed while transcript was loading */
+            }
+          }
+        })
+        .catch(() => {
+          /* transcript missing/unreadable — claude still spawns */
+        })
+        .finally(() => {
+          clearTimeout(gateTimer);
+          openPrePtyGate();
+        });
+    } else {
+      queueMicrotask(openPrePtyGate);
+    }
 
     invoke(IPC.SpawnAgent, {
       taskId,

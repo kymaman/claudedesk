@@ -160,6 +160,11 @@ export function setLaunchSettings(sessionId: string, s: LaunchSettings): void {
   ).run(sessionId, s.agentId, JSON.stringify(s.extraFlags), s.skipPermissions ? 1 : 0, Date.now());
 }
 
+export function deleteLaunchSettings(sessionId: string): void {
+  const db = getDb();
+  db.prepare('DELETE FROM session_launch_settings WHERE session_id = ?').run(sessionId);
+}
+
 interface CachedSummary {
   title: string | null;
   summary: string | null;

@@ -1,6 +1,7 @@
 import path from 'path';
 import { homedir } from 'os';
 import { isCommandOnPath } from '../platform.js';
+import { probeClaudeBin } from './agent-probe.js';
 
 interface AgentDef {
   id: string;
@@ -12,6 +13,13 @@ interface AgentDef {
   description: string;
   available?: boolean;
   prompt_ready_delay_ms?: number;
+  /** Version + supported flags from probing the binary's --help. Lets
+   *  the renderer filter args so a future CLI release dropping e.g.
+   *  --remote-control degrades gracefully instead of breaking spawn. */
+  capabilities?: {
+    version: string | null;
+    supportedFlags: string[];
+  };
 }
 
 import { IS_WINDOWS } from '../platform.js';
@@ -21,11 +29,9 @@ import { IS_WINDOWS } from '../platform.js';
 // with working defaults regardless of who installed it.
 //
 // `.local/bin/claude.exe` is the modern claude CLI 2.1.162 — supports
-// Opus 4.8 via `--model claude-opus-4-8`. Its TUI uses the alt-screen
-// buffer, so scrollback in xterm.js v5 is empty by default; we mitigate
-// that with the AltScreenStripper in the PTY pipeline (see
-// strip-alt-screen.ts + agentSpawn integration), which makes claude
-// redraw into the normal buffer so old frames land in scrollback.
+// Opus 4.8 via `--model claude-opus-4-8`. claude does NOT replay
+// history on --resume, so resumed tiles pre-seed xterm scrollback from
+// the session JSONL (TerminalView + session-transcript.ts).
 //
 // `claude-4.7/claude.exe` is claude CLI 2.1.116 pinned for users who
 // still want Opus 4.7 (the only version available on 2.1.116). The
@@ -132,10 +138,26 @@ export async function listAgents(): Promise<AgentDef[]> {
   }
 
   cachedAgents = await Promise.all(
-    DEFAULT_AGENTS.map(async (agent) => ({
-      ...agent,
-      available: await isCommandAvailable(agent.command),
-    })),
+    DEFAULT_AGENTS.map(async (agent) => {
+      const available = await isCommandAvailable(agent.command);
+      // Probe only when the binary actually exists; probing a missing
+      // command path would print spurious errors and waste a process.
+      // Probe only claude-* (other agents have unrelated CLI surfaces).
+      let capabilities: AgentDef['capabilities'] | undefined;
+      if (available && agent.id.startsWith('claude-')) {
+        try {
+          const caps = await probeClaudeBin(agent.command);
+          capabilities = {
+            version: caps.version,
+            supportedFlags: Array.from(caps.flags),
+          };
+        } catch {
+          // Probe failures are non-fatal — renderer will treat the
+          // missing capabilities as "no probe data" and skip filtering.
+        }
+      }
+      return { ...agent, available, capabilities };
+    }),
   );
   cacheTime = now;
   return cachedAgents;

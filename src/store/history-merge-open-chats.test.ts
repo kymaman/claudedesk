@@ -189,6 +189,65 @@ describe('bug #35 — History shows OPEN chats with a sessionId without refresh'
     history.setSearchQuery('');
   });
 
+  it('opening an OLD disk session bumps it to the top of "newest" IMMEDIATELY (no refresh)', async () => {
+    const { chats, history } = await importBoth();
+    const oldSession = {
+      sessionId: 'old-one',
+      filePath: '/j/o.jsonl',
+      projectPath: '/tmp/b',
+      title: 'старая сессия',
+      date: '2026-01-05',
+      folderIds: [] as string[],
+    };
+    history.setSessions([
+      {
+        sessionId: 'newer',
+        filePath: '/j/n.jsonl',
+        projectPath: '/tmp/a',
+        title: 'newer',
+        date: '2026-06-09',
+        folderIds: [],
+      },
+      oldSession,
+    ]);
+    // Sanity: before opening, the newer disk session is first.
+    expect(history.filteredSessions()[0]!.sessionId).toBe('newer');
+
+    chats.openChatFromSession(oldSession, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+
+    // The open bump must reorder IN THE MOMENT — no loadSessions(), no
+    // app restart. createdAt(now) > '2026-06-09' lexicographically.
+    const visible = history.filteredSessions();
+    expect(visible[0]!.sessionId).toBe('old-one');
+    // Title and the rest of the disk entry are untouched by the bump.
+    expect(visible[0]!.title).toBe('старая сессия');
+    expect(visible[0]!.filePath).toBe('/j/o.jsonl');
+  });
+
+  it('the open bump only moves time FORWARD — never sinks a future-dated session', async () => {
+    const { chats, history } = await importBoth();
+    const future = {
+      sessionId: 'future',
+      filePath: '/j/f.jsonl',
+      projectPath: '/tmp/f',
+      title: 'future',
+      date: '2099-12-31',
+      folderIds: [] as string[],
+    };
+    history.setSessions([future]);
+    chats.openChatFromSession(future, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    });
+    // openedAt(2026-…) < '2099-12-31' → the original date must survive.
+    expect(history.filteredSessions()[0]!.date).toBe('2099-12-31');
+  });
+
   it('a NON-renamed open chat does NOT override the fresh disk title', async () => {
     const { chats, history } = await importBoth();
     history.setSessions([

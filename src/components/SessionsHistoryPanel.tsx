@@ -30,6 +30,7 @@ import {
   sessionsError,
   loadSessions,
   renameSessionLocal,
+  summarizeSessionAction,
   filteredSessions,
   folders,
   activeFolderId,
@@ -51,6 +52,7 @@ import {
 import {
   loadLaunchSettings,
   saveLaunchSettings,
+  resetLaunchSettings,
   type LaunchSettings,
 } from '../store/launch-settings';
 import { openChatFromSession, openChats, branchChatFromSession } from '../store/chats';
@@ -87,6 +89,32 @@ function claudeAgents() {
 
 export function SessionsHistoryPanel(props: Props) {
   const [hoveredSession, setHoveredSession] = createSignal<SessionItem | null>(null);
+  // Bulk AI-title progress label ("3/24") or null when idle.
+  const [aiTitlesProgress, setAiTitlesProgress] = createSignal<string | null>(null);
+
+  /** Bulk: one-line AI titles for the visible sessions. force:false —
+   *  sessions already carrying a manual alias are skipped server-side,
+   *  so hand-typed names are never clobbered. Two parallel haiku calls
+   *  keep it quick without hammering the CLI. */
+  async function runAiTitles() {
+    if (aiTitlesProgress()) return;
+    const targets = filteredSessions().filter((s) => s.filePath);
+    if (targets.length === 0) return;
+    let done = 0;
+    setAiTitlesProgress(`0/${targets.length}`);
+    const queue = [...targets];
+    const workers = Array.from({ length: 2 }, async () => {
+      for (;;) {
+        const s = queue.shift();
+        if (!s) return;
+        await summarizeSessionAction(s.sessionId, { force: false });
+        done += 1;
+        setAiTitlesProgress(`${done}/${targets.length}`);
+      }
+    });
+    await Promise.all(workers);
+    setAiTitlesProgress(null);
+  }
   const [draggedFolderTarget, setDraggedFolderTarget] = createSignal<string | null>(null);
   const [creatingFolder, setCreatingFolder] = createSignal(false);
   const [newFolderName, setNewFolderName] = createSignal('');
@@ -151,6 +179,14 @@ export function SessionsHistoryPanel(props: Props) {
           <option value="project">Project</option>
           <option value="title">Title</option>
         </select>
+        <button
+          class="sessions-panel__ai-titles"
+          onClick={() => void runAiTitles()}
+          title="AI названия: одной строкой «о чём диалог» для видимых сессий (haiku). Ручные имена не трогает."
+          disabled={!!aiTitlesProgress()}
+        >
+          {aiTitlesProgress() ?? '✨'}
+        </button>
         <button
           class="sessions-panel__refresh"
           onClick={() => {
@@ -656,7 +692,7 @@ function SessionRow(props: {
 
   // Load persisted launch settings for this session (defaults to opus-4.8 + no flags)
   const [settings, setSettings] = createSignal<LaunchSettings>({
-    agentId: 'claude-opus-4-7',
+    agentId: 'claude-opus-4-8',
     extraFlags: [],
     skipPermissions: false,
   });
@@ -697,6 +733,16 @@ function SessionRow(props: {
   async function persistSettings(next: LaunchSettings) {
     setSettings(next);
     await saveLaunchSettings(props.session.sessionId, next);
+  }
+
+  async function resetSettingsToDefault() {
+    const fallback: LaunchSettings = {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    };
+    setSettings(fallback);
+    await resetLaunchSettings(props.session.sessionId);
   }
 
   async function commitEdit() {
@@ -743,6 +789,19 @@ function SessionRow(props: {
   async function handleRemoveFromFolder(folderId: string, e: MouseEvent) {
     e.stopPropagation();
     await removeSessionFromFolderAction(props.session.sessionId, folderId);
+  }
+
+  const [summarizing, setSummarizing] = createSignal(false);
+  /** Per-row AI title — force:true (explicit user action overrides an
+   *  existing manual alias, unlike the bulk header button). */
+  async function handleAiTitle() {
+    if (summarizing()) return;
+    setSummarizing(true);
+    try {
+      await summarizeSessionAction(props.session.sessionId, { force: true });
+    } finally {
+      setSummarizing(false);
+    }
   }
 
   function handleContextMenu(e: MouseEvent) {
@@ -888,6 +947,17 @@ function SessionRow(props: {
             onClick={(e) => {
               e.stopPropagation();
               setMenuOpen(false);
+              void handleAiTitle();
+            }}
+            title="Сгенерировать однострочное название через claude (haiku)"
+          >
+            {summarizing() ? 'AI title…' : 'AI title ✨'}
+          </button>
+          <button
+            class="session-item__menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
               void invoke<string>(IPC.OpenPath, {
                 filePath: props.session.projectPath,
               }).catch((err) => {
@@ -963,6 +1033,16 @@ function SessionRow(props: {
           <div class="launch-option__hint">
             Saved per-session. Applied automatically every time you resume this chat.
           </div>
+          <button
+            class="launch-option__reset"
+            onClick={(e) => {
+              e.stopPropagation();
+              void resetSettingsToDefault();
+            }}
+            title="Forget per-session overrides; use the global default agent again"
+          >
+            Reset to default
+          </button>
         </div>
       </Show>
     </div>

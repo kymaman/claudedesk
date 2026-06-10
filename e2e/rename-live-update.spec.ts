@@ -85,19 +85,20 @@ test('chat tile head updates title immediately after right-click → Rename', as
   expect(before.length).toBeGreaterThan(0);
 
   const newTitle = `renamed-tile-${Date.now().toString().slice(-5)}`;
-  // window.prompt is shown via the right-click → Rename path. Hook the
-  // dialog handler BEFORE clicking so we accept it with the new name.
-  win.once('dialog', async (dialog) => {
-    await dialog.accept(newTitle);
-  });
-
-  // Right-click the head → menu → Rename.
+  // Right-click the head → menu → Rename → INLINE input (window.prompt
+  // was replaced — modal prompts are fragile in Electron and this path
+  // failed both as a feature and under automation).
   await tile.locator('.chat-tile__head').click({ button: 'right' });
   const menu = win.locator('.chat-tile__menu');
   await expect(menu).toBeVisible({ timeout: 3_000 });
   await menu.locator('button', { hasText: /^rename$/i }).click();
 
-  // After the prompt is accepted, renameChat fires → tile title updates.
+  const input = tile.locator('.chat-tile__title-input');
+  await expect(input).toBeVisible({ timeout: 3_000 });
+  await input.fill(newTitle);
+  await input.press('Enter');
+
+  // renameChat fires → tile title updates in place.
   await win.waitForTimeout(300);
   const after = (await titleEl.textContent())?.trim() ?? '';
   expect(

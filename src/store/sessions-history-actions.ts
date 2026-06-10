@@ -14,6 +14,7 @@ import { store } from './core';
 import { addProject } from './projects';
 import { createTask } from './tasks';
 import { filterState } from './session-filters';
+import { openChats, renameChat } from './chats';
 import type { AgentDef } from '../ipc/types';
 import {
   type SessionItem,
@@ -61,6 +62,40 @@ export async function renameSessionLocal(sessionId: string, alias: string): Prom
 
 export async function fetchSessionPreview(filePath: string): Promise<SessionPreview> {
   return invoke<SessionPreview>(IPC.GetClaudeSessionPreview, { filePath });
+}
+
+/**
+ * AI title: asks headless claude (haiku) for a one-line "what was this
+ * chat about" and stores it as the session alias. Updates the local
+ * sessions list immediately; when the session also has an OPEN tile,
+ * syncs the tile's rename override so the History overlay doesn't
+ * re-impose a stale manual title on top of the fresh AI one.
+ *
+ * `force=false` (bulk mode) skips sessions that already carry a manual
+ * alias — never clobber names the user typed by hand.
+ */
+export async function summarizeSessionAction(
+  sessionId: string,
+  opts: { force?: boolean } = {},
+): Promise<string | null> {
+  try {
+    const res = await invoke<{ title: string; skipped: boolean }>(IPC.SummarizeSession, {
+      sessionId,
+      force: opts.force ?? true,
+    });
+    if (!res?.title) return null;
+    setSessions((prev) =>
+      prev.map((s) => (s.sessionId === sessionId ? { ...s, title: res.title } : s)),
+    );
+    if (!res.skipped) {
+      const open = openChats().find((c) => c.sessionId === sessionId);
+      if (open) renameChat(open.id, res.title);
+    }
+    return res.title;
+  } catch (err) {
+    console.warn('[sessions-history] summarize failed:', err);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +223,7 @@ export async function resumeSession(
     }
 
     // 2. Pick a Claude binary. Prefer Opus 4.8, then any claude-*, then the first available.
-    const preferred = opts.agentId ?? 'claude-opus-4-7';
+    const preferred = opts.agentId ?? 'claude-opus-4-8';
     const available = store.availableAgents;
     const baseAgent =
       available.find((a) => a.id === preferred) ??

@@ -17,6 +17,14 @@ export interface AgentDef {
   /** Per-agent override for the stability-check delay (ms) used before auto-sending
    *  the initial prompt.  Agents with multi-step init dialogs need a longer wait. */
   prompt_ready_delay_ms?: number;
+  /** Probed version + supported long flags (parsed from `claude --help`).
+   *  Used by the renderer to filter out ClaudeDesk-owned flags the
+   *  binary doesn't recognise, so a future CLI release that drops or
+   *  renames a flag gracefully degrades instead of crashing spawn. */
+  capabilities?: {
+    version: string | null;
+    supportedFlags: string[];
+  };
 }
 
 export interface CreateTaskResult {

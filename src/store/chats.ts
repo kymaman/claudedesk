@@ -151,6 +151,7 @@ if (typeof window !== 'undefined') {
     renameChat: (id: string, title: string) => renameChat(id, title),
     titleFor: (chat: Pick<Chat, 'id' | 'title'>) => titleFor(chat),
     branchChat: (id: string) => branchChat(id),
+    summarizeChat: (id: string) => summarizeChat(id),
   };
 }
 
@@ -194,6 +195,17 @@ export function openChats(): Chat[] {
 
 /** Soft cap — after this, a new chat opens in a separate Electron window. */
 export const MAX_CHATS_PER_WINDOW = 12;
+
+/** Branch-title formatter: appends "• branch HH:MM" so chains of forks
+ *  visibly grow ("A • branch 13:42 • branch 14:15") — the user can see at
+ *  a glance where the branch came from and when it was made. Local time
+ *  (not UTC) so the suffix matches the wall clock the user remembers. */
+export function makeBranchTitle(parentTitle: string, at: number): string {
+  const d = new Date(at);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${parentTitle} • branch ${hh}:${mm}`;
+}
 
 function resolveAgent(agentDefId: string) {
   return (
@@ -326,7 +338,7 @@ export function openFreshChat(params: {
   title?: string;
   projectId?: string | null;
 }): Chat | null {
-  const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-7');
+  const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-8');
   if (!baseAgent) {
     console.error('[chats] no Claude agent available');
     return null;
@@ -450,7 +462,7 @@ export function branchChat(chatId: string): Chat | null {
   const branched: Chat = {
     id: crypto.randomUUID(),
     sessionId: src.sessionId,
-    title: `${baseTitle} • branch`,
+    title: makeBranchTitle(baseTitle, now),
     cwd: src.cwd,
     agentDefId: baseAgent.id,
     command: baseAgent.command,
@@ -506,7 +518,7 @@ export function branchChatFromSession(
   return buildChat({
     id: crypto.randomUUID(),
     sessionId: session.sessionId,
-    title: `${parentTitle} • branch`,
+    title: makeBranchTitle(parentTitle, Date.now()),
     cwd: session.projectPath,
     baseAgent,
     args,
@@ -541,6 +553,32 @@ export function renameChat(chatId: string, title: string): void {
     invoke(IPC.RenameClaudeSession, { sessionId: chat.sessionId, alias: title }).catch((err) => {
       console.warn('[renameChat] failed to persist session alias:', err);
     });
+  }
+}
+
+/**
+ * Generates a one-line "о чём этот диалог" title for the chat via a
+ * headless `claude -p --model haiku` run over the transcript tail
+ * (SummarizeSession IPC), then applies it through renameChat — so the
+ * new title shows up IMMEDIATELY in the tile header, the History
+ * overlay, and search, and persists as the session alias. Returns the
+ * generated title or null on failure (chat without sessionId, claude
+ * offline, etc.).
+ */
+export async function summarizeChat(chatId: string): Promise<string | null> {
+  const chat = _chats().find((c) => c.id === chatId);
+  if (!chat?.sessionId || typeof window === 'undefined') return null;
+  try {
+    const res = await invoke<{ title: string; skipped: boolean }>(IPC.SummarizeSession, {
+      sessionId: chat.sessionId,
+      force: true,
+    });
+    if (!res?.title) return null;
+    renameChat(chatId, res.title);
+    return res.title;
+  } catch (err) {
+    console.warn('[summarizeChat] failed:', err);
+    return null;
   }
 }
 

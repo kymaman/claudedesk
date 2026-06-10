@@ -5,7 +5,7 @@
  * through the live Electron UI:
  *
  *   1. Open a real History session as a chat tile.
- *   2. Rename the tile (real path: window.prompt → renameChat) to a
+ *   2. Rename the tile (real path: inline editor → renameChat) to a
  *      title containing a unique token the original title does NOT
  *      contain.
  *   3. Type that token into the real History search box.
@@ -18,7 +18,7 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { launchApp, closeAllChats, awaitChatReady } from './helpers.js';
+import { launchApp, closeAllChats, awaitChatReady, type BridgeWindow } from './helpers.js';
 
 let app: ElectronApplication;
 let win: Page;
@@ -61,12 +61,13 @@ test('History search finds a session by its tile rename (миграция HH bug
   await expect(tile).toBeVisible({ timeout: 15_000 });
   await awaitChatReady(win, 10_000).catch(() => undefined);
 
-  // Override window.prompt so the real rename path returns our title,
-  // then trigger the actual UI rename (double-click the tile title).
-  await win.evaluate((t) => {
-    (window as unknown as { prompt: (m?: string, d?: string) => string }).prompt = () => t;
-  }, newTitle);
+  // Trigger the actual UI rename: double-click the tile title opens the
+  // INLINE editor (window.prompt was replaced — fragile in Electron).
   await tile.locator('.chat-tile__title').dblclick();
+  const titleInput = tile.locator('.chat-tile__title-input');
+  await expect(titleInput).toBeVisible({ timeout: 3_000 });
+  await titleInput.fill(newTitle);
+  await titleInput.press('Enter');
   await win.waitForTimeout(400);
 
   // The tile header must now show the new title.
@@ -103,6 +104,29 @@ test('History search finds a session by its tile rename (миграция HH bug
   await search.fill(token.toLowerCase());
   await win.waitForTimeout(400);
   expect(await win.locator('.session-item').count()).toBeGreaterThanOrEqual(1);
+
+  // Persistence: the rename must live in the alias DB (not just this
+  // window's localStorage) — the REAL list IPC returns it as the title.
+  const persistedSid = await win.evaluate(async (t) => {
+    const bridge = (window as unknown as BridgeWindow).electron;
+    if (!bridge) return null;
+    const list = (await bridge.ipcRenderer.invoke('list_claude_sessions')) as Array<{
+      sessionId: string;
+      title: string;
+    }>;
+    return list.find((s) => s.title === t)?.sessionId ?? null;
+  }, newTitle);
+  expect(persistedSid, 'rename was not persisted as a session alias').not.toBeNull();
+
+  // Cleanup: clear the test alias so the user's real session goes back
+  // to its parsed title instead of keeping "миграция ZZQHH тест".
+  if (persistedSid) {
+    await win.evaluate(async (sid) => {
+      const bridge = (window as unknown as BridgeWindow).electron;
+      if (!bridge) return;
+      await bridge.ipcRenderer.invoke('rename_claude_session', { sessionId: sid, alias: '' });
+    }, persistedSid);
+  }
 
   await search.fill('');
 });

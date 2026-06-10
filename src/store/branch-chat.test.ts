@@ -119,8 +119,12 @@ describe('branchChat', () => {
     expect(branched!.cwd).toBe(src!.cwd);
     expect(branched!.projectId).toBe(src!.projectId);
 
-    // Title carries the " • branch" suffix.
-    expect(branched!.title).toBe(`${SESSION.title} • branch`);
+    // Title carries the " • branch HH:MM" suffix (local time of the fork).
+    expect(branched!.title).toMatch(
+      new RegExp(
+        `^${SESSION.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} • branch \\d{2}:\\d{2}$`,
+      ),
+    );
 
     // args: --resume <sid> first, then --fork-session, then skip-perms, then extras.
     expect(branched!.args).toEqual([
@@ -150,7 +154,7 @@ describe('branchChat', () => {
     });
     m.renameChat(src!.id, 'Renamed source');
     const branched = m.branchChat(src!.id);
-    expect(branched!.title).toBe('Renamed source • branch');
+    expect(branched!.title).toMatch(/^Renamed source • branch \d{2}:\d{2}$/);
   });
 
   it('records fork lineage (forkParent) pointing at the source session', async () => {

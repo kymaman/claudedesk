@@ -833,6 +833,22 @@
   font-style: italic;
 }
 
+.launch-option__reset {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.launch-option__reset:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
 .session-item__resume {
   flex-shrink: 0;
   background: transparent;
@@ -925,4 +941,29 @@
   line-height: 1.45;
   margin-top: 2px;
   opacity: 0.88;
+}
+
+/* Bulk AI-titles button. Deliberately does NOT share the
+   .sessions-panel__refresh class — e2e selectors (smoke.spec) target
+   that class in strict mode and two matches break them. Shows "3/24"
+   progress while running, so it needs a little more room than the
+   icon-only refresh button. */
+.sessions-panel__ai-titles {
+  background: transparent;
+  border: none;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  min-width: 30px;
+  padding: 3px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sessions-panel__ai-titles:hover {
+  color: var(--fg);
+  background: var(--bg-input);
 }

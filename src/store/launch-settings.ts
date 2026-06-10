@@ -37,3 +37,11 @@ export async function saveLaunchSettings(
     console.warn('[launch-settings] save failed:', err);
   }
 }
+
+export async function resetLaunchSettings(sessionId: string): Promise<void> {
+  try {
+    await invoke<undefined>(IPC.DeleteLaunchSettings, { sessionId });
+  } catch (err) {
+    console.warn('[launch-settings] reset failed:', err);
+  }
+}

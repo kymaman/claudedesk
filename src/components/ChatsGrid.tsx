@@ -12,6 +12,7 @@ import {
   closeChat,
   renameChat,
   branchChat,
+  summarizeChat,
   openChats,
   MAX_CHATS_PER_WINDOW,
   reorderChat,
@@ -112,11 +113,30 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
     });
   });
 
-  function onRename(e: MouseEvent) {
-    e.stopPropagation();
-    const current = titleFor(props.chat);
-    const next = window.prompt('Rename chat', current);
-    if (next && next.trim() && next !== current) renameChat(props.chat.id, next.trim());
+  // Inline title editor. window.prompt was used here before, but it is
+  // synchronous-modal and fragile in Electron (it interrupted handlers
+  // on some builds and is invisible to Playwright's dialog event in
+  // others) — the two OTHER rename surfaces (TopSwitcher chip, History
+  // row) already use in-DOM inputs and never had these problems.
+  const [editingTitle, setEditingTitle] = createSignal(false);
+  const [titleDraft, setTitleDraft] = createSignal('');
+  let titleInputRef: HTMLInputElement | undefined;
+
+  function startRename(e?: MouseEvent) {
+    e?.stopPropagation();
+    setTitleDraft(titleFor(props.chat));
+    setEditingTitle(true);
+    // Focus after Solid renders the input.
+    queueMicrotask(() => {
+      titleInputRef?.focus();
+      titleInputRef?.select();
+    });
+  }
+
+  function commitRename() {
+    const next = titleDraft().trim();
+    setEditingTitle(false);
+    if (next && next !== titleFor(props.chat)) renameChat(props.chat.id, next);
   }
 
   function onHeadContextMenu(e: MouseEvent) {
@@ -182,7 +202,7 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
       <div
         ref={headRef}
         class="chat-tile__head"
-        draggable={true}
+        draggable={!editingTitle()}
         onDragStart={onHeadDragStart}
         onContextMenu={onHeadContextMenu}
         title="Drag to reorder · double-click title to rename · right-click for menu"
@@ -198,9 +218,31 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
             </span>
           )}
         </Show>
-        <span class="chat-tile__title" title={props.chat.cwd} onDblClick={onRename}>
-          {titleFor(props.chat)}
-        </span>
+        <Show
+          when={editingTitle()}
+          fallback={
+            <span class="chat-tile__title" title={props.chat.cwd} onDblClick={startRename}>
+              {titleFor(props.chat)}
+            </span>
+          }
+        >
+          <input
+            ref={titleInputRef}
+            class="chat-tile__title-input"
+            value={titleDraft()}
+            onInput={(e) => setTitleDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename();
+              }
+              if (e.key === 'Escape') setEditingTitle(false);
+            }}
+            onBlur={commitRename}
+            onClick={(e) => e.stopPropagation()}
+            onDblClick={(e) => e.stopPropagation()}
+          />
+        </Show>
         <span class="chat-tile__agent">{props.chat.agentDefId.replace(/^claude-/, '')}</span>
         <button
           class="chat-tile__close"
@@ -217,17 +259,31 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
             <button
               class="chat-tile__menu-item"
               onClick={(e) => {
-                // IMPORTANT: run the rename BEFORE closing the menu.
-                // setMenuOpen(false) tears down the <Show> subtree
-                // synchronously, which can interrupt window.prompt mid-
-                // handler on some Electron builds — the prompt never
-                // returns and renameChat is skipped. Closing the menu
-                // is cosmetic; do it after.
-                onRename(e);
+                startRename(e);
                 setMenuOpen(false);
               }}
             >
               Rename
+            </button>
+            <button
+              class="chat-tile__menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                // AI title: one line "о чём этот диалог" from headless
+                // claude (haiku); applied via renameChat → instant in
+                // the tile header + History + search, persists as alias.
+                void summarizeChat(props.chat.id).then((t) => {
+                  if (!t) {
+                    console.warn(
+                      '[chat-tile] AI title unavailable (no sessionId yet, or claude -p failed)',
+                    );
+                  }
+                });
+              }}
+              title="Одной строкой: о чём этот диалог (claude haiku) — станет названием тайла"
+            >
+              AI title ✨
             </button>
             <button
               class="chat-tile__menu-item"

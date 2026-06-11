@@ -21,7 +21,13 @@ import { classifyInjectedText } from '../lib/injected-text';
 import { resolveFileLink } from '../lib/file-link-resolve';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import { shouldWriteTranscript } from '../lib/transcript-prefill';
+import { planWheelScroll } from '../lib/terminal-wheel';
 import type { PtyOutput } from '../ipc/types';
+
+// Whole lines moved per wheel notch (no smoothing — see terminal-wheel.ts).
+// One knob to tune scroll speed: small enough to never lose your place,
+// large enough not to feel sluggish.
+const WHEEL_LINES_PER_NOTCH = 3;
 
 // Pre-computed base64 lookup table — avoids atob() intermediate string allocation.
 const B64_LOOKUP = new Uint8Array(128);
@@ -131,13 +137,15 @@ export function TerminalView(props: TerminalViewProps) {
       theme: getTerminalTheme(store.themePreset),
       allowProposedApi: true,
       scrollback: TERMINAL_SCROLLBACK_LINES,
-      // Wheel speed history: default 1 line/tick felt like "scrollback
-      // only moves a tiny bit"; 5/tick made lines visibly JUMP so the
-      // user lost his reading position. 3/tick + smooth animation keeps
-      // the speed but glides through every line instead of skipping.
+      // Wheel scrolling is handled by our own capture-phase listener
+      // (see WHEEL_LINES_PER_NOTCH below): Claude Code's TUI enables mouse
+      // tracking, which makes xterm forward the wheel to the app instead
+      // of scrolling — so we take it over. No smooth animation (the owner
+      // explicitly didn't want it); every notch moves whole lines so no
+      // line is skipped. These options are the fallback for the rare
+      // not-hijacked path.
       scrollSensitivity: 3,
       fastScrollSensitivity: 12,
-      smoothScrollDuration: 120,
     });
 
     fitAddon = new FitAddon();
@@ -213,10 +221,33 @@ export function TerminalView(props: TerminalViewProps) {
     };
     containerRef.addEventListener('paste', onContainerPaste);
 
+    // Wheel-to-scroll: Claude Code's TUI turns on mouse tracking, so by
+    // default xterm forwards wheel ticks to the app as mouse events and
+    // the terminal won't scroll up to earlier output. We take the wheel
+    // over in capture phase: in the normal buffer we scroll xterm's own
+    // scrollback by whole lines (no smoothing, nothing skipped) and stop
+    // the event so it isn't ALSO sent to claude. Ctrl+wheel (zoom) and the
+    // alternate screen (vim/less) are left to bubble untouched.
+    const onContainerWheel = (e: WheelEvent) => {
+      if (!term) return;
+      const plan = planWheelScroll({
+        deltaY: e.deltaY,
+        altScreen: term.buffer.active.type === 'alternate',
+        ctrlKey: e.ctrlKey,
+        linesPerNotch: WHEEL_LINES_PER_NOTCH,
+      });
+      if (!plan.hijack) return;
+      term.scrollLines(plan.scrollLines);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    containerRef.addEventListener('wheel', onContainerWheel, { capture: true, passive: false });
+
     onCleanup(() => {
       containerRef.removeEventListener('dragover', onContainerDragOver);
       containerRef.removeEventListener('drop', onContainerDrop);
       containerRef.removeEventListener('paste', onContainerPaste);
+      containerRef.removeEventListener('wheel', onContainerWheel, { capture: true });
     });
 
     // File path link provider — makes file paths clickable in terminal output

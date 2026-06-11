@@ -10,7 +10,6 @@ import { TilingLayout } from './components/TilingLayout';
 import { TopSwitcher } from './components/TopSwitcher';
 import { SessionsHistoryPanel } from './components/SessionsHistoryPanel';
 import { AgentsView } from './components/AgentsView';
-import { SessionTreeView } from './components/SessionTreeView';
 import { AssistantSidebar } from './components/AssistantSidebar';
 import { ProjectsPanel } from './components/ProjectsPanel';
 import { assistantOpen } from './store/assistant';
@@ -813,12 +812,6 @@ function App() {
             </div>
             <Show when={mainView() === 'agents'}>
               <AgentsView />
-            </Show>
-            {/* Tree has no PTYs inside — safe to mount/unmount via Show.
-                Re-mounting also re-fetches the lineage, which is what we
-                want after branching/resuming. */}
-            <Show when={mainView() === 'tree'}>
-              <SessionTreeView />
             </Show>
             {/* Branches stays mounted across mainView switches — same reason
                 as Projects above. <Show> would unmount <TilingLayout> and every

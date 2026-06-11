@@ -1,0 +1,70 @@
+/* SessionFamilyGraph — git-style граф семьи сессий, раскрывается инлайн в History */
+
+.tree-family {
+  margin: 2px 8px 10px 24px;
+  border: 1px solid var(--border, #1c1c21);
+  border-radius: 10px;
+  background: var(--bg-panel, #0b0b0d);
+  overflow: hidden;
+}
+
+.tree-family__svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* ----- graph primitives ----- */
+
+.tree-edge {
+  fill: none;
+  stroke: #2b3f50;
+  stroke-width: 2;
+}
+
+.tree-node {
+  cursor: pointer;
+}
+
+.tree-node__hit {
+  fill: transparent;
+}
+
+.tree-node:hover .tree-node__hit {
+  fill: rgba(255, 255, 255, 0.04);
+}
+
+.tree-node__dot {
+  fill: var(--bg, #000);
+  stroke: #8b8b93;
+  stroke-width: 2;
+}
+
+.tree-node:hover .tree-node__dot {
+  stroke: #e8e8ec;
+}
+
+.tree-node__dot--live {
+  fill: #4ade80;
+  stroke: #4ade80;
+}
+
+.tree-node__label {
+  fill: var(--fg, #e8e8ec);
+  font-size: 12.5px;
+}
+
+.tree-node__meta {
+  fill: var(--fg-subtle, #6b6b73);
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+}
+
+.tree-node__branch {
+  fill: var(--fg-subtle, #6b6b73);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.tree-node__branch:hover {
+  fill: #7dd3fc;
+}

@@ -949,6 +949,36 @@
   opacity: 0.95;
 }
 
+/* ▸ — inline family-tree expander on rows that have branches */
+.session-item__tree-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: 1px solid var(--border, #232328);
+  border-radius: 6px;
+  color: var(--accent, #7dd3fc);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.session-item__tree-toggle:hover {
+  border-color: var(--accent, #7dd3fc);
+}
+
+.session-item__tree-toggle--open {
+  background: rgba(125, 211, 252, 0.08);
+}
+
+.session-item__tree-count {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  opacity: 0.85;
+}
+
 /* Bulk AI-titles button. Deliberately does NOT share the
    .sessions-panel__refresh class — e2e selectors (smoke.spec) target
    that class in strict mode and two matches break them. Shows "3/24"

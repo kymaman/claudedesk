@@ -71,6 +71,9 @@ import { hideSession } from '../store/session-hide';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { DragMime } from '../lib/drag-mime';
+import { SessionFamilyGraph } from './SessionFamilyGraph';
+import { loadSessionTree, familyFor } from '../store/session-tree';
+import type { TreeNode } from '../lib/session-tree-layout';
 
 interface Props {
   /** When provided, renders a close button in the header (overlay mode). */
@@ -137,7 +140,54 @@ export function SessionsHistoryPanel(props: Props) {
   onMount(() => {
     if (sessions().length === 0) void loadSessions();
     void loadFolders();
+    // Lineage families for the inline ▸ tree — heavy scan, loaded once
+    // per app run in the background (see src/store/session-tree.ts).
+    void loadSessionTree();
   });
+
+  // Which rows have their family tree expanded inline.
+  const [expandedTrees, setExpandedTrees] = createSignal<ReadonlySet<string>>(new Set<string>());
+  function toggleTree(sessionId: string) {
+    setExpandedTrees((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }
+
+  function nodeToSessionItem(node: TreeNode): SessionItem {
+    const known = sessions().find((s) => s.sessionId === node.sessionId);
+    return (
+      known ?? {
+        sessionId: node.sessionId,
+        filePath: node.filePath,
+        projectPath: node.projectDir,
+        title: `сессия ${node.sessionId.slice(0, 8)}`,
+        date: new Date(node.mtimeMs).toISOString().slice(0, 10),
+        folderIds: [],
+      }
+    );
+  }
+
+  async function nodeSettings(sessionId: string): Promise<LaunchSettings> {
+    const stored = await loadLaunchSettings(sessionId).catch(() => null);
+    return (
+      stored ?? {
+        agentId: claudeAgents()[0]?.id ?? 'claude-opus-4-8',
+        extraFlags: [],
+        skipPermissions: false,
+      }
+    );
+  }
+
+  async function openTreeNode(node: TreeNode) {
+    openChatFromSession(nodeToSessionItem(node), await nodeSettings(node.sessionId));
+  }
+
+  async function branchTreeNode(node: TreeNode) {
+    await branchChatFromSession(nodeToSessionItem(node), await nodeSettings(node.sessionId));
+  }
 
   function beginCreateFolder() {
     setCreatingFolder(true);
@@ -412,19 +462,43 @@ export function SessionsHistoryPanel(props: Props) {
             }
           >
             <For each={filteredSessions()}>
-              {(session) => (
-                <SessionRow
-                  session={session}
-                  parentTitle={
-                    session.branchParentId
-                      ? (sessionTitleById().get(session.branchParentId) ??
-                        session.branchParentId.slice(0, 8))
-                      : undefined
-                  }
-                  onClose={props.onClose ?? (() => {})}
-                  onHover={(s) => setHoveredSession(s)}
-                />
-              )}
+              {(session) => {
+                const family = () => familyFor(session.sessionId);
+                const expanded = () => expandedTrees().has(session.sessionId);
+                return (
+                  <>
+                    <SessionRow
+                      session={session}
+                      parentTitle={
+                        session.branchParentId
+                          ? (sessionTitleById().get(session.branchParentId) ??
+                            session.branchParentId.slice(0, 8))
+                          : undefined
+                      }
+                      branchCount={family()?.members.length}
+                      treeExpanded={expanded()}
+                      onToggleTree={() => toggleTree(session.sessionId)}
+                      onClose={props.onClose ?? (() => {})}
+                      onHover={(s) => setHoveredSession(s)}
+                    />
+                    {/* «Одна входит в другую»: ▸ на строке раскрывает граф
+                        семьи прямо под ней (бывшая вкладка Tree). */}
+                    <Show when={expanded() && family()}>
+                      {(fam) => (
+                        <SessionFamilyGraph
+                          family={fam()}
+                          display={(n) =>
+                            sessionTitleById().get(n.sessionId) ??
+                            `сессия ${n.sessionId.slice(0, 8)}`
+                          }
+                          onOpen={(n) => void openTreeNode(n)}
+                          onBranch={(n) => void branchTreeNode(n)}
+                        />
+                      )}
+                    </Show>
+                  </>
+                );
+              }}
             </For>
           </Show>
         </div>
@@ -668,6 +742,10 @@ function SessionRow(props: {
   session: SessionItem;
   /** Display title of the session this one was branched from (⑂) */
   parentTitle?: string | undefined;
+  /** Family size when this session has a lineage tree (≥2 members). */
+  branchCount?: number | undefined;
+  treeExpanded?: boolean;
+  onToggleTree?: () => void;
   onClose: () => void;
   onHover: (s: SessionItem) => void;
 }) {
@@ -868,6 +946,20 @@ function SessionRow(props: {
       title="Click to resume · right-click to rename / delete"
     >
       <div class="session-item__title-row">
+        {/* ▸ — у сессий с ветками: раскрывает граф семьи прямо под строкой */}
+        <Show when={(props.branchCount ?? 0) >= 2}>
+          <button
+            class={`session-item__tree-toggle${props.treeExpanded ? ' session-item__tree-toggle--open' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onToggleTree?.();
+            }}
+            title={`Дерево веток (${props.branchCount}) — развернуть/свернуть`}
+          >
+            {props.treeExpanded ? '▾' : '▸'}
+            <span class="session-item__tree-count">{props.branchCount}</span>
+          </button>
+        </Show>
         <Show
           when={editing()}
           fallback={<span class="session-item__title">{props.session.title}</span>}

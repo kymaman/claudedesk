@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createEffect } from 'solid-js';
+import DOMPurify from 'dompurify';
 import { Dialog } from './Dialog';
 import { createDialogScroll } from '../lib/dialog-scroll';
 import { ReviewProvider, useReview } from './ReviewProvider';
@@ -113,7 +114,11 @@ function PlanViewerContent(props: PlanViewerContentProps) {
         if (!source) return;
         const id = `mermaid-plan-${Date.now()}-${i}`;
         mermaid.render(id, source).then(({ svg }) => {
-          el.innerHTML = svg;
+          // Defense-in-depth: sanitize mermaid SVG output before insertion.
+          // DOMPurify strips event handlers (onclick, onerror, etc.) and
+          // javascript: URIs while keeping all legitimate SVG/HTML structure.
+          // FORCE_BODY prevents DOMPurify from stripping the outer <svg> tag.
+          el.innerHTML = DOMPurify.sanitize(svg, { FORCE_BODY: true });
           el.classList.add('mermaid-rendered');
         });
       });

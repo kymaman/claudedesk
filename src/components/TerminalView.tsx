@@ -232,6 +232,7 @@ export function TerminalView(props: TerminalViewProps) {
       if (!term) return;
       const plan = planWheelScroll({
         deltaY: e.deltaY,
+        deltaMode: e.deltaMode,
         altScreen: term.buffer.active.type === 'alternate',
         ctrlKey: e.ctrlKey,
         linesPerNotch: WHEEL_LINES_PER_NOTCH,

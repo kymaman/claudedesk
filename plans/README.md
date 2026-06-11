@@ -13,7 +13,7 @@ pick for the next round.
 
 | Plan | Title                                                        | Priority | Effort | Depends on       | Status |
 | ---- | ------------------------------------------------------------ | -------- | ------ | ---------------- | ------ |
-| 001  | Cache + parallelize session-lineage scan (Tree tab perf)     | P1       | M      | —                | TODO   |
+| 001  | Cache + parallelize session-lineage scan (Tree tab perf)     | P1       | M      | —                | DONE   |
 | 002  | Remote-access hardening: Origin check, sessionStorage, CSP   | P1       | S      | —                | TODO   |
 | 003  | Make silent catch blocks observable (chats, session-history) | P2       | S      | —                | TODO   |
 | 004  | Run unit tests in CI + raise vitest timeout                  | P2       | S      | —                | TODO   |

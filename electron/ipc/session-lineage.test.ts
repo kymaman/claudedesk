@@ -158,6 +158,65 @@ describe('listSessionFamilies / resolveLiveSessionId (synthetic)', () => {
   });
 });
 
+describe('meta cache', () => {
+  let root: string;
+  let proj: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-lineage-cache-'));
+    proj = path.join(root, 'D--cache-project');
+    fs.mkdirSync(proj, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('cache hit: unchanged files are NOT re-read on the second call', async () => {
+    const old = new Date(Date.now() - 120_000);
+    writeJsonl(proj, sid(10), [mid(10), mid(11)], old);
+    writeJsonl(proj, sid(11), [mid(10), mid(11), mid(12)], old);
+    // first call populates the cache
+    await listSessionFamilies({ projectsDir: root });
+    // spy AFTER first call so we only measure the second
+    const spy = vi.spyOn(fs, 'createReadStream');
+    await listSessionFamilies({ projectsDir: root });
+    expect(spy.mock.calls.length).toBe(0);
+  });
+
+  it('invalidation: appending to a file causes it to be re-read', async () => {
+    const old = new Date(Date.now() - 120_000);
+    writeJsonl(proj, sid(20), [mid(20), mid(21)], old);
+    writeJsonl(proj, sid(21), [mid(20), mid(21), mid(22)], old);
+    // first call populates the cache
+    await listSessionFamilies({ projectsDir: root });
+
+    // mutate one file: append a new message uuid
+    const changedFile = path.join(proj, `${sid(21)}.jsonl`);
+    const newUuid = mid(99);
+    fs.appendFileSync(
+      changedFile,
+      JSON.stringify({
+        type: 'user',
+        uuid: newUuid,
+        sessionId: sid(21),
+        message: { role: 'user', content: 'new' },
+      }) + '\n',
+      'utf-8',
+    );
+    // advance mtime to guarantee cache invalidation on coarse-grained clocks
+    const newMtime = new Date(old.getTime() + 10_000);
+    fs.utimesSync(changedFile, newMtime, newMtime);
+
+    const fams = await listSessionFamilies({ projectsDir: root, includeSingletons: true });
+    const member = fams.flatMap((f) => f.members).find((m) => m.sessionId === sid(21));
+    // the re-read file now has one more message in its count
+    expect(member).toBeDefined();
+    if (member) expect(member.messageCount).toBe(4);
+  });
+});
+
 describe.runIf(HAS_WISPR)('REAL: Wispr Flow family on this machine', () => {
   it(
     'reconstructs the family around fc4a2f36 with a sane shape',

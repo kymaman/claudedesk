@@ -69,6 +69,15 @@ interface FileMeta {
 /** Hard cap keeps tree building cheap even with huge sessions. */
 const MAX_UUIDS_PER_FILE = 20_000;
 
+/**
+ * Session JSONLs are append-only, so (mtimeMs, size) keys a valid cache.
+ * NOTE: if a future change makes session files NOT append-only (e.g.
+ * rewriting history in place with same length), the (mtimeMs, size) key
+ * must gain a content hash — see Plan 001 maintenance notes.
+ */
+const metaCache = new Map<string, { mtimeMs: number; size: number; meta: FileMeta }>();
+const META_CACHE_MAX = 2_000;
+
 async function readFileMeta(filePath: string): Promise<FileMeta | null> {
   const base = path.basename(filePath).replace(/\.jsonl$/i, '');
   if (!UUID_RE.test(base)) return null;
@@ -77,6 +86,10 @@ async function readFileMeta(filePath: string): Promise<FileMeta | null> {
     st = fs.statSync(filePath);
   } catch {
     return null;
+  }
+  const cached = metaCache.get(filePath);
+  if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+    return cached.meta;
   }
   const meta: FileMeta = {
     sessionId: base,
@@ -111,7 +124,15 @@ async function readFileMeta(filePath: string): Promise<FileMeta | null> {
     rl.on('error', () => resolve());
   });
 
-  return meta.rootUuid ? meta : null;
+  if (meta.rootUuid) {
+    if (metaCache.size > META_CACHE_MAX) {
+      const oldest = metaCache.keys().next().value;
+      if (oldest !== undefined) metaCache.delete(oldest);
+    }
+    metaCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, meta });
+    return meta;
+  }
+  return null;
 }
 
 function listJsonlFiles(root: string): string[] {
@@ -192,6 +213,20 @@ export function resolveParents(
   return out;
 }
 
+async function mapPool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /**
  * Build all session families across every project dir.
  * Returns only families (and singletons) — singletons included so the
@@ -206,11 +241,7 @@ export async function listSessionFamilies(opts?: {
 }): Promise<SessionFamily[]> {
   const root = opts?.projectsDir ?? getClaudeProjectsDir();
   const files = listJsonlFiles(root);
-  const metas: FileMeta[] = [];
-  for (const f of files) {
-    const m = await readFileMeta(f);
-    if (m) metas.push(m);
-  }
+  const metas = (await mapPool(files, 8, readFileMeta)).filter((m): m is FileMeta => m !== null);
   const byRoot = new Map<string, FileMeta[]>();
   for (const m of metas) {
     const key = m.rootUuid as string;

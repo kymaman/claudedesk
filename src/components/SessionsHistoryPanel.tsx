@@ -140,14 +140,19 @@ export function SessionsHistoryPanel(props: Props) {
   onMount(() => {
     if (sessions().length === 0) void loadSessions();
     void loadFolders();
-    // Lineage families for the inline ▸ tree — heavy scan, loaded once
-    // per app run in the background (see src/store/session-tree.ts).
-    void loadSessionTree();
+    // The lineage scan reads every JSONL head on the main process. We need
+    // it to know which rows have branches (the ▸ marker), but running it on
+    // mount competed with a resumed tile's transcript IPC and timed out the
+    // 3s prefill gate → empty scrollback. So DEFER it past the resume window
+    // (the gate fix in TerminalView is the belt; this is the suspenders).
+    const t = window.setTimeout(() => void loadSessionTree(), 1500);
+    onCleanup(() => clearTimeout(t));
   });
 
   // Which rows have their family tree expanded inline.
   const [expandedTrees, setExpandedTrees] = createSignal<ReadonlySet<string>>(new Set<string>());
   function toggleTree(sessionId: string) {
+    void loadSessionTree(); // idempotent — no-op once loaded
     setExpandedTrees((prev) => {
       const next = new Set(prev);
       if (next.has(sessionId)) next.delete(sessionId);

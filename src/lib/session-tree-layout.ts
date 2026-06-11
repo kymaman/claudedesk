@@ -25,6 +25,51 @@ export interface LaidNode extends TreeNode {
   parent?: LaidNode | undefined;
 }
 
+/** One row of the indented outline: the node + its depth from the root. */
+export interface OutlineRow {
+  node: TreeNode;
+  /** 0 = root, +1 per generation — drives left indentation. */
+  depth: number;
+  /** true when this node has children in the family (for connector guides). */
+  hasChildren: boolean;
+  /** true when this is the last child of its parent (collapses the guide). */
+  isLastChild: boolean;
+}
+
+/**
+ * Depth-first outline of a family — root, then each child and its
+ * descendants, siblings ordered by mtime. This is the Obsidian / iPhone
+ * Notes style: every generation indents one step further right. Pure /
+ * DOM-free so it unit-tests cleanly.
+ */
+export function outlineFamily(members: TreeNode[]): OutlineRow[] {
+  const byId = new Map(members.map((m) => [m.sessionId, m]));
+  const children = new Map<string, TreeNode[]>();
+  const roots: TreeNode[] = [];
+  for (const m of members) {
+    const pid = m.parentSessionId;
+    if (pid && byId.has(pid)) {
+      const arr = children.get(pid) ?? [];
+      arr.push(m);
+      children.set(pid, arr);
+    } else {
+      roots.push(m);
+    }
+  }
+  const byMtime = (a: TreeNode, b: TreeNode): number =>
+    a.mtimeMs - b.mtimeMs || a.sessionId.localeCompare(b.sessionId);
+  roots.sort(byMtime);
+
+  const out: OutlineRow[] = [];
+  const visit = (n: TreeNode, depth: number, isLastChild: boolean): void => {
+    const kids = (children.get(n.sessionId) ?? []).slice().sort(byMtime);
+    out.push({ node: n, depth, hasChildren: kids.length > 0, isLastChild });
+    kids.forEach((k, i) => visit(k, depth + 1, i === kids.length - 1));
+  };
+  roots.forEach((r, i) => visit(r, 0, i === roots.length - 1));
+  return out;
+}
+
 /**
  * Assign lanes git-graph style: members arrive mtime-ordered (root
  * first — guaranteed by the main process). The FIRST child of a node

@@ -20,6 +20,7 @@ import { listenXtermBridge } from '../lib/xterm-bridge';
 import { classifyInjectedText } from '../lib/injected-text';
 import { resolveFileLink } from '../lib/file-link-resolve';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
+import { shouldWriteTranscript } from '../lib/transcript-prefill';
 import type { PtyOutput } from '../ipc/types';
 
 // Pre-computed base64 lookup table — avoids atob() intermediate string allocation.
@@ -951,12 +952,14 @@ export function TerminalView(props: TerminalViewProps) {
       const gateTimer = window.setTimeout(openPrePtyGate, 3000);
       invoke<string>(IPC.LoadSessionTranscript, { sessionId: resumeSessionId })
         .then((transcript) => {
-          if (transcript && term && !prePtyGateOpen) {
-            // xterm serializes writes in call order, so opening the
-            // gate right after this write keeps PTY bytes below the
-            // transcript in scrollback.
+          // Write whenever the transcript loaded and the term is alive —
+          // NOT only when the gate is still closed. If the IPC stalled
+          // past the 3s gate (e.g. main process busy), the old `!gateOpen`
+          // guard DROPPED the transcript and left empty scrollback. A late
+          // transcript below the banner beats no transcript at all.
+          if (shouldWriteTranscript({ transcript, termAlive: !!term })) {
             try {
-              term.write(transcript + '\r\n');
+              term?.write(transcript + '\r\n');
             } catch {
               /* terminal disposed while transcript was loading */
             }

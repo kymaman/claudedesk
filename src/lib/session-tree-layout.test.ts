@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { layoutFamily, type TreeNode } from './session-tree-layout';
+import { layoutFamily, outlineFamily, type TreeNode } from './session-tree-layout';
 
 function node(id: string, parent: string | null, mtimeMs: number): TreeNode {
   return {
@@ -65,5 +65,38 @@ describe('layoutFamily', () => {
     const byId = new Map(laid.map((n) => [n.sessionId, n]));
     expect(byId.get('X')?.col).toBe(1);
     expect(byId.get('X')?.parent).toBeUndefined();
+  });
+});
+
+describe('outlineFamily (indented Obsidian-style outline)', () => {
+  it('depth increases one step per generation (DFS order)', () => {
+    const rows = outlineFamily([node('A', null, 1), node('B', 'A', 2), node('C', 'B', 3)]);
+    expect(rows.map((r) => r.node.sessionId)).toEqual(['A', 'B', 'C']);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2]);
+  });
+
+  it('siblings sit at the same depth, ordered by mtime, after their parent (DFS)', () => {
+    // A → B (then B's child D) and A → C. DFS: A, B, D, C.
+    const rows = outlineFamily([
+      node('A', null, 1),
+      node('B', 'A', 2),
+      node('C', 'A', 4),
+      node('D', 'B', 3),
+    ]);
+    expect(rows.map((r) => r.node.sessionId)).toEqual(['A', 'B', 'D', 'C']);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2, 1]);
+  });
+
+  it('marks hasChildren and isLastChild for connector guides', () => {
+    const rows = outlineFamily([node('A', null, 1), node('B', 'A', 2), node('C', 'A', 3)]);
+    const byId = new Map(rows.map((r) => [r.node.sessionId, r]));
+    expect(byId.get('A')?.hasChildren).toBe(true);
+    expect(byId.get('B')?.isLastChild).toBe(false);
+    expect(byId.get('C')?.isLastChild).toBe(true);
+  });
+
+  it('orphans (parent outside the slice) are treated as roots at depth 0', () => {
+    const rows = outlineFamily([node('A', null, 1), node('X', 'missing', 2)]);
+    expect(rows.map((r) => r.depth)).toEqual([0, 0]);
   });
 });

@@ -949,34 +949,37 @@
   opacity: 0.95;
 }
 
-/* ▸ — inline family-tree expander on rows that have branches */
+/* ▸ — inline family-tree expander on rows that have branches.
+   Brighter + larger than a plain chevron so it reads at a glance. */
 .session-item__tree-toggle {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  background: none;
-  border: 1px solid var(--border, #232328);
+  gap: 4px;
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid var(--accent, #7dd3fc);
   border-radius: 6px;
   color: var(--accent, #7dd3fc);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 700;
   line-height: 1;
-  padding: 2px 6px;
+  padding: 3px 8px;
 }
 
 .session-item__tree-toggle:hover {
-  border-color: var(--accent, #7dd3fc);
+  background: rgba(125, 211, 252, 0.22);
 }
 
 .session-item__tree-toggle--open {
-  background: rgba(125, 211, 252, 0.08);
+  background: var(--accent, #7dd3fc);
+  color: #06121a;
 }
 
 .session-item__tree-count {
   font-family: var(--font-mono, monospace);
-  font-size: 10px;
-  opacity: 0.85;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 /* Bulk AI-titles button. Deliberately does NOT share the

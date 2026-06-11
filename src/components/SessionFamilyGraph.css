@@ -1,70 +1,75 @@
-/* SessionFamilyGraph — git-style граф семьи сессий, раскрывается инлайн в History */
+/* SessionFamilyGraph — indented outline of a session family (Obsidian / iPhone Notes style),
+   разворачивается инлайн в History под строкой-родителем. */
 
-.tree-family {
-  margin: 2px 8px 10px 24px;
-  border: 1px solid var(--border, #1c1c21);
-  border-radius: 10px;
-  background: var(--bg-panel, #0b0b0d);
-  overflow: hidden;
+.fam-outline {
+  margin: 0 8px 8px 26px;
+  padding: 4px 0;
+  border-left: 2px solid var(--accent, #7dd3fc);
+  background: rgba(125, 211, 252, 0.03);
+  border-radius: 0 8px 8px 0;
 }
 
-.tree-family__svg {
-  display: block;
-  max-width: 100%;
-}
-
-/* ----- graph primitives ----- */
-
-.tree-edge {
-  fill: none;
-  stroke: #2b3f50;
-  stroke-width: 2;
-}
-
-.tree-node {
+.fam-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-right: 10px;
   cursor: pointer;
+  border-radius: 6px;
 }
 
-.tree-node__hit {
-  fill: transparent;
+.fam-row:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.tree-node:hover .tree-node__hit {
-  fill: rgba(255, 255, 255, 0.04);
+.fam-row__bullet {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-subtle, #8b8b93);
 }
 
-.tree-node__dot {
-  fill: var(--bg, #000);
-  stroke: #8b8b93;
-  stroke-width: 2;
+.fam-row__bullet--live {
+  color: #4ade80;
 }
 
-.tree-node:hover .tree-node__dot {
-  stroke: #e8e8ec;
+.fam-row__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
-.tree-node__dot--live {
-  fill: #4ade80;
-  stroke: #4ade80;
-}
-
-.tree-node__label {
-  fill: var(--fg, #e8e8ec);
+.fam-row__title {
   font-size: 12.5px;
+  color: var(--fg, #e8e8ec);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.tree-node__meta {
-  fill: var(--fg-subtle, #6b6b73);
+.fam-row__meta {
   font-size: 10.5px;
   font-family: var(--font-mono, monospace);
+  color: var(--fg-subtle, #6b6b73);
 }
 
-.tree-node__branch {
-  fill: var(--fg-subtle, #6b6b73);
-  font-size: 15px;
+.fam-row__branch {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border, #232328);
+  border-radius: 6px;
+  color: var(--fg-subtle, #8b8b93);
   cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 8px;
 }
 
-.tree-node__branch:hover {
-  fill: #7dd3fc;
+.fam-row__branch:hover {
+  color: #7dd3fc;
+  border-color: #7dd3fc;
 }

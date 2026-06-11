@@ -50,16 +50,15 @@ test('▸ on a session row expands the family graph inline', async () => {
   }
 
   await toggle.click();
-  const graph = win.locator('.tree-family').first();
-  await expect(graph).toBeVisible({ timeout: 5_000 });
-  expect(await graph.locator('.tree-node').count()).toBeGreaterThanOrEqual(2);
-  expect(await graph.locator('.tree-edge').count()).toBeGreaterThanOrEqual(1);
+  const outline = win.locator('.fam-outline').first();
+  await expect(outline).toBeVisible({ timeout: 5_000 });
+  expect(await outline.locator('.fam-row').count()).toBeGreaterThanOrEqual(2);
 
-  // Node labels are real text, not empty.
-  const label = (await graph.locator('.tree-node__label').first().textContent()) ?? '';
-  expect(label.trim().length).toBeGreaterThan(0);
+  // Row titles are real text, not empty.
+  const title = (await outline.locator('.fam-row__title').first().textContent()) ?? '';
+  expect(title.trim().length).toBeGreaterThan(0);
 
   // Collapse back.
   await win.locator('.session-item__tree-toggle--open').first().click();
-  await expect(win.locator('.tree-family')).toHaveCount(0);
+  await expect(win.locator('.fam-outline')).toHaveCount(0);
 });

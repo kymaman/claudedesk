@@ -1,25 +1,21 @@
 /**
- * SessionFamilyGraph.tsx — git-style graph of ONE session family.
+ * SessionFamilyGraph.tsx — indented OUTLINE of one session family.
  *
  * Embedded inline in History (a row's ▸ toggle expands it right under
- * the row — «одна входит в другую»). Time flows top→bottom, the root
- * session runs down the left rail, branches curve out to their own
- * columns. Click a node → resume that session; ⑂ → fork from it.
+ * the row — «одна входит в другую»). Obsidian / iPhone-Notes style:
+ * the root sits at the left, every branch generation indents one step
+ * further right, with guide lines down each level. Readable on the
+ * normal list background (the old SVG git-graph rendered near-invisible
+ * on the dark panel — replaced 2026-06-11 per the owner's feedback).
  *
- * Extracted from the former SessionTreeView (the separate Tree tab was
- * removed 2026-06-11 per the owner's request — the tree now lives
- * inside History).
+ * Click a node → resume that session; ⑂ → fork a new branch from it.
  */
 
-import { For, Show, createMemo } from 'solid-js';
-import { layoutFamily, type TreeFamily, type TreeNode } from '../lib/session-tree-layout';
+import { For, createMemo } from 'solid-js';
+import { outlineFamily, type TreeFamily, type TreeNode } from '../lib/session-tree-layout';
 import './SessionFamilyGraph.css';
 
-const COL_W = 26;
-const ROW_H = 46;
-const PAD_X = 22;
-const PAD_Y = 14;
-const WIDTH = 760;
+const INDENT_PX = 22;
 
 function fmtDate(ms: number): string {
   const d = new Date(ms);
@@ -41,83 +37,52 @@ export function SessionFamilyGraph(props: {
   onOpen: (n: TreeNode) => void;
   onBranch: (n: TreeNode) => void;
 }) {
-  const laid = createMemo(() => layoutFamily(props.family.members));
-  const maxCol = createMemo(() => laid().reduce((m, n) => Math.max(m, n.col), 0));
-  const height = createMemo(() => PAD_Y * 2 + laid().length * ROW_H);
-  const x = (col: number) => PAD_X + col * COL_W;
-  const y = (row: number) => PAD_Y + row * ROW_H + ROW_H / 2;
-  const labelX = createMemo(() => x(maxCol()) + 30);
-
+  const rows = createMemo(() => outlineFamily(props.family.members));
   const newest = createMemo(() =>
-    laid().reduce((best, n) => (n.mtimeMs > best.mtimeMs ? n : best), laid()[0]),
+    props.family.members.reduce(
+      (best, n) => (n.mtimeMs > best.mtimeMs ? n : best),
+      props.family.members[0],
+    ),
   );
 
   return (
-    <div class="tree-family">
-      <svg
-        class="tree-family__svg"
-        width={WIDTH}
-        height={height()}
-        viewBox={`0 0 ${WIDTH} ${height()}`}
-      >
-        {/* edges first, under the nodes */}
-        <For each={laid()}>
-          {(n) => (
-            <Show when={n.parent}>
-              {(p) => {
-                const px = x(p().col);
-                const py = y(p().row);
-                const cx = x(n.col);
-                const cy = y(n.row);
-                const d =
-                  n.col === p().col
-                    ? `M ${px} ${py} L ${cx} ${cy}`
-                    : `M ${px} ${py} C ${px} ${py + ROW_H * 0.7}, ${cx} ${cy - ROW_H * 0.7}, ${cx} ${cy}`;
-                return <path class="tree-edge" d={d} />;
-              }}
-            </Show>
-          )}
-        </For>
-        <For each={laid()}>
-          {(n) => (
-            <g class="tree-node" onClick={() => props.onOpen(n)} role="button" tabIndex={0}>
-              {/* row hit-area so clicks on the label work too */}
-              <rect
-                class="tree-node__hit"
-                x={0}
-                y={y(n.row) - ROW_H / 2}
-                width={WIDTH}
-                height={ROW_H}
-              />
-              <circle
-                class={`tree-node__dot${n.sessionId === newest().sessionId ? ' tree-node__dot--live' : ''}`}
-                cx={x(n.col)}
-                cy={y(n.row)}
-                r={n.parent ? 5.5 : 7}
-              />
-              <text class="tree-node__label" x={labelX()} y={y(n.row) - 3}>
-                {props.display(n).slice(0, 64)}
-              </text>
-              <text class="tree-node__meta" x={labelX()} y={y(n.row) + 13}>
-                {fmtDate(n.mtimeMs)} · {n.messageCount} зап. · {n.sessionId.slice(0, 8)}
-              </text>
-              {/* per-node branch button (stops propagation so it doesn't open) */}
-              <text
-                class="tree-node__branch"
-                x={WIDTH - 28}
-                y={y(n.row) + 4}
+    <div class="fam-outline">
+      <For each={rows()}>
+        {(row) => {
+          const isNewest = () => row.node.sessionId === newest().sessionId;
+          return (
+            <div
+              class="fam-row"
+              style={{ 'padding-left': `${row.depth * INDENT_PX}px` }}
+              role="button"
+              tabIndex={0}
+              onClick={() => props.onOpen(row.node)}
+              title={`${props.display(row.node)}\nоткрыть — клик · ветвиться — ⑂`}
+            >
+              <span class={`fam-row__bullet${isNewest() ? ' fam-row__bullet--live' : ''}`}>
+                {row.depth === 0 ? '●' : '⑂'}
+              </span>
+              <span class="fam-row__body">
+                <span class="fam-row__title">{props.display(row.node)}</span>
+                <span class="fam-row__meta">
+                  {fmtDate(row.node.mtimeMs)} · {row.node.messageCount} зап. ·{' '}
+                  {row.node.sessionId.slice(0, 8)}
+                </span>
+              </span>
+              <button
+                class="fam-row__branch"
+                title="Ветвиться от этой сессии"
                 onClick={(e) => {
                   e.stopPropagation();
-                  props.onBranch(n);
+                  props.onBranch(row.node);
                 }}
               >
                 ⑂
-              </text>
-              <title>{`${props.display(n)}\nоткрыть — клик · ветвиться — ⑂ справа`}</title>
-            </g>
-          )}
-        </For>
-      </svg>
+              </button>
+            </div>
+          );
+        }}
+      </For>
     </div>
   );
 }

@@ -57,6 +57,11 @@ export interface Chat {
    *  Absent for non-forked chats. Captured deterministically at branch
    *  time (we know the parent then) and persisted across restarts. */
   forkParent?: { sessionId: string; title: string };
+  /** Earlier session ids this tile lived under. claude mints a NEW
+   *  session file on every --resume; watchLiveSession() moves
+   *  `sessionId` to the live file and parks the old id here so History
+   *  dedup still recognises the tile when the user clicks a stale row. */
+  pastSessionIds?: string[];
 }
 
 type RootSig<T> = [Accessor<T>, Setter<T>];
@@ -254,7 +259,70 @@ function buildChat(params: {
   _lastActiveAtById.set(chat.id, now);
   _setActiveChatId(chat.id);
   schedulePersistOpenChats();
+  if (chat.sessionId) watchLiveSession(chat.id);
   return chat;
+}
+
+/**
+ * claude mints a NEW session JSONL (new id) every time a tile resumes a
+ * session — the tile's recorded sessionId goes stale the moment the
+ * user sends the first message. Stale ids caused the «Branch forks from
+ * the FIRST session» bug: branching passed the open-time id to
+ * --resume, dropping everything said since.
+ *
+ * This watcher asks the main process to poll the project dir for the
+ * live continuation file (a sibling JSONL containing the original's
+ * last message uuid) and, once found, moves the chat onto the live id.
+ * The main process also records the resume edge + carries the alias
+ * over, so History and the family tree stay coherent.
+ */
+const LIVE_WATCH_MS = 180_000;
+function watchLiveSession(chatId: string): void {
+  if (typeof window === 'undefined') return;
+  const chat = _chats().find((c) => c.id === chatId);
+  if (!chat?.sessionId) return;
+  const originalSid = chat.sessionId;
+  invoke<{ sessionId: string; changed: boolean }>(IPC.ResolveLiveSession, {
+    sessionId: originalSid,
+    sinceMs: Date.now() - 5_000,
+    waitMs: LIVE_WATCH_MS,
+  })
+    .then((res) => {
+      if (!res?.changed) return;
+      adoptLiveSessionId(chatId, originalSid, res.sessionId);
+    })
+    .catch(() => {
+      /* lineage tracking is best-effort — the tile keeps working */
+    });
+}
+
+/** Move a chat onto its live session id (no-op if the chat moved on). */
+function adoptLiveSessionId(chatId: string, fromSid: string, liveSid: string): void {
+  const cur = _chats().find((c) => c.id === chatId);
+  if (!cur || cur.closed || cur.sessionId !== fromSid || fromSid === liveSid) return;
+  _setChats((prev) =>
+    prev.map((c) =>
+      c.id === chatId
+        ? {
+            ...c,
+            sessionId: liveSid,
+            pastSessionIds: [...(c.pastSessionIds ?? []), fromSid].slice(-10),
+          }
+        : c,
+    ),
+  );
+  schedulePersistOpenChats();
+  // Branch tiles: replace the auto-recorded 'resume' edge with the true
+  // fork edge so the family tree shows a ⑂ split, not a continuation.
+  if (cur.forkParent) {
+    invoke(IPC.RecordSessionLineage, {
+      childId: liveSid,
+      parentId: cur.forkParent.sessionId,
+      kind: 'fork',
+    }).catch(() => {
+      /* best-effort */
+    });
+  }
 }
 
 export function openChatFromSession(
@@ -275,9 +343,16 @@ export function openChatFromSession(
   // projectId) so the same session can legitimately appear in two
   // workspaces (global Chats vs. inside a project).
   const targetProjectId = options.projectId ?? null;
+  // A tile may have ADVANCED past the clicked session id (claude mints a
+  // new id per resume; watchLiveSession moves the tile forward) — match
+  // past ids too, or clicking the stale History row would duplicate the
+  // tile and resume an outdated snapshot next to the live one.
   const existing = _chats().find(
     (c) =>
-      !c.closed && c.sessionId === session.sessionId && (c.projectId ?? null) === targetProjectId,
+      !c.closed &&
+      (c.sessionId === session.sessionId ||
+        (c.pastSessionIds?.includes(session.sessionId) ?? false)) &&
+      (c.projectId ?? null) === targetProjectId,
   );
   if (existing) {
     // Title-sync: the row the user just clicked carries the freshest
@@ -433,7 +508,7 @@ export function closeChat(chatId: string): void {
  * Requires the source chat to have a sessionId (otherwise there's no
  * conversation to fork — returns null and logs).
  */
-export function branchChat(chatId: string): Chat | null {
+export async function branchChat(chatId: string): Promise<Chat | null> {
   const src = _chats().find((c) => c.id === chatId && !c.closed);
   if (!src) {
     console.warn('[branchChat] source chat not found:', chatId);
@@ -449,9 +524,31 @@ export function branchChat(chatId: string): Chat | null {
     return null;
   }
 
+  // Last-moment safety net for the «branch forks from the FIRST
+  // session» bug: even if watchLiveSession missed the continuation file
+  // (claude minted it after the 3-min watch window), a single disk scan
+  // right now catches it — so the fork starts from what the user SEES,
+  // not from the open-time snapshot.
+  let forkFromSid = src.sessionId;
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await invoke<{ sessionId: string; changed: boolean }>(IPC.ResolveLiveSession, {
+        sessionId: src.sessionId,
+        sinceMs: src.createdAt - 5_000,
+        waitMs: 0,
+      });
+      if (res?.changed) {
+        adoptLiveSessionId(src.id, src.sessionId, res.sessionId);
+        forkFromSid = res.sessionId;
+      }
+    } catch {
+      /* fall back to the recorded id */
+    }
+  }
+
   const args = [
     '--resume',
-    src.sessionId,
+    forkFromSid,
     '--fork-session',
     ...(src.settings.skipPermissions ? baseAgent.skip_permissions_args : []),
     ...src.settings.extraFlags,
@@ -461,7 +558,7 @@ export function branchChat(chatId: string): Chat | null {
   const baseTitle = _titleOverrides().get(src.id) ?? src.title;
   const branched: Chat = {
     id: crypto.randomUUID(),
-    sessionId: src.sessionId,
+    sessionId: forkFromSid,
     title: makeBranchTitle(baseTitle, now),
     cwd: src.cwd,
     agentDefId: baseAgent.id,
@@ -473,7 +570,7 @@ export function branchChat(chatId: string): Chat | null {
     createdAt: now,
     lastActiveAt: now,
     closed: false,
-    forkParent: { sessionId: src.sessionId, title: baseTitle },
+    forkParent: { sessionId: forkFromSid, title: baseTitle },
   };
 
   // Insert right after the source so the two tiles sit side-by-side in
@@ -488,6 +585,7 @@ export function branchChat(chatId: string): Chat | null {
   _lastActiveAtById.set(branched.id, now);
   _setActiveChatId(branched.id);
   schedulePersistOpenChats();
+  watchLiveSession(branched.id);
   return branched;
 }
 
@@ -621,6 +719,8 @@ interface PersistedChat {
   /** Fork lineage — preserved across restarts so the "⑂ from X" badge
    *  survives a quit/relaunch. */
   forkParent?: { sessionId: string; title: string };
+  /** Earlier session ids the tile lived under (see Chat.pastSessionIds). */
+  pastSessionIds?: string[];
 }
 
 /** Snapshot non-project chats to localStorage. Debounced via the createEffect
@@ -645,6 +745,7 @@ function persistOpenChats(): void {
         createdAt: c.createdAt,
         gridIndex: i,
         ...(c.forkParent ? { forkParent: c.forkParent } : {}),
+        ...(c.pastSessionIds?.length ? { pastSessionIds: c.pastSessionIds } : {}),
       }))
       .slice(0, MAX_PERSISTED);
     localStorage.setItem(PERSIST_KEY, JSON.stringify(snapshot));
@@ -772,12 +873,22 @@ export function restoreOpenChats(): void {
         skipPermissions: p.skipPermissions ?? false,
       });
     }
-    // Re-apply fork lineage so the "⑂ from X" badge survives restart.
-    if (restoredChat && p.forkParent) {
+    // Re-apply fork lineage + past session ids so the "⑂ from X" badge
+    // and History-row dedup survive restart.
+    if (restoredChat && (p.forkParent || p.pastSessionIds?.length)) {
       const fp = p.forkParent;
+      const past = p.pastSessionIds;
       _setChats((prev) =>
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- restoredChat asserted non-null in caller scope above
-        prev.map((c) => (c.id === restoredChat!.id ? { ...c, forkParent: fp } : c)),
+        prev.map((c) =>
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- restoredChat asserted non-null in caller scope above
+          c.id === restoredChat!.id
+            ? {
+                ...c,
+                ...(fp ? { forkParent: fp } : {}),
+                ...(past?.length ? { pastSessionIds: past } : {}),
+              }
+            : c,
+        ),
       );
     }
   }

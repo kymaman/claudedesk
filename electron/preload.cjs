@@ -121,6 +121,10 @@ const ALLOWED_CHANNELS = new Set([
   'load_session_transcript',
   'summarize_session',
   'rename_claude_session',
+  // Session lineage / family tree
+  'resolve_live_session',
+  'list_session_tree',
+  'record_session_lineage',
   // Folders
   'list_folders',
   'create_folder',

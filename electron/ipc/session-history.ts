@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import { getClaudeProjectsDir, getSessionAliasesDbPath } from '../paths.js';
 import {
   isNoiseUserText,
+  isAiTitleHelperText,
   pickSessionTitle,
   looksLikeStaleBoilerplateTitle,
 } from './session-title.js';
@@ -30,12 +31,17 @@ export interface SessionItem {
   projectPath: string;
   /** Display title — from index, alias, or fallback */
   title: string;
+  /** Title parsed from the first real prompt — shown as the second
+   *  line when an alias/AI title occupies the first (variant 2.1) */
+  parsedTitle?: string;
   /** ISO date string extracted from index or file mtime */
   date: string;
   /** Short description from SESSIONS_INDEX.md (if found) */
   description?: string;
   /** User-defined folder memberships (from session_folder_map) */
   folderIds: string[];
+  /** Session this one was explicitly branched from (⑂), if recorded */
+  branchParentId?: string;
 }
 
 export interface FolderItem {
@@ -118,8 +124,55 @@ function getDb(): Database.Database {
       skip_permissions INTEGER NOT NULL DEFAULT 0,
       updated_at       INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS session_lineage (
+      child_id   TEXT PRIMARY KEY,
+      parent_id  TEXT NOT NULL,
+      kind       TEXT NOT NULL DEFAULT 'fork',
+      created_at INTEGER NOT NULL
+    );
   `);
   return _db;
+}
+
+// ---------------------------------------------------------------------------
+// Session lineage (exact parent edges recorded by ClaudeDesk itself).
+// kind: 'fork' = explicit Branch (--fork-session), 'resume' = the live
+// continuation file claude minted when a tile resumed a session. JSONL
+// reconstruction (session-lineage.ts) is heuristic; these rows are truth.
+// ---------------------------------------------------------------------------
+
+export type LineageKind = 'fork' | 'resume';
+
+export function recordLineage(childId: string, parentId: string, kind: LineageKind): void {
+  if (!childId || !parentId || childId === parentId) return;
+  const db = getDb();
+  db.prepare(
+    'INSERT OR REPLACE INTO session_lineage (child_id, parent_id, kind, created_at) VALUES (?, ?, ?, ?)',
+  ).run(childId, parentId, kind, Date.now());
+}
+
+/** child → parent for ALL recorded edges (tree reconstruction overrides). */
+export function getLineageOverrides(): Map<string, string> {
+  const db = getDb();
+  const rows = db
+    .prepare<
+      [],
+      { child_id: string; parent_id: string }
+    >('SELECT child_id, parent_id FROM session_lineage')
+    .all();
+  return new Map(rows.map((r) => [r.child_id, r.parent_id]));
+}
+
+/** child → parent for explicit BRANCHES only (the ⑂ badge in History). */
+export function getBranchParents(): Map<string, string> {
+  const db = getDb();
+  const rows = db
+    .prepare<
+      [],
+      { child_id: string; parent_id: string }
+    >("SELECT child_id, parent_id FROM session_lineage WHERE kind = 'fork'")
+    .all();
+  return new Map(rows.map((r) => [r.child_id, r.parent_id]));
 }
 
 export interface LaunchSettings {
@@ -645,77 +698,92 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
   // Sort newest first by mtime
   unique.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
-  // Pre-fetch folder memberships for all sessions in one query.
+  // Pre-fetch folder memberships + recorded branch parents in one query each.
   const folderIdsMap = getFolderIdsForSessions(unique.map((u) => u.sessionId));
+  const branchParents = getBranchParents();
 
   // Resolve each session's display title + description.
   // Priority: user alias → SESSIONS_INDEX.md → cached JSONL extract → live JSONL parse.
-  const items: SessionItem[] = await mapPool(unique, JSONL_PARSE_CONCURRENCY, async (raw) => {
-    const uuid8 = raw.sessionId.slice(0, 8);
-    const indexEntry = index.get(uuid8);
-    const alias = getAlias(raw.sessionId);
-    const date = indexEntry?.date ?? raw.mtime.toISOString().slice(0, 10);
+  const items: Array<SessionItem | null> = await mapPool(
+    unique,
+    JSONL_PARSE_CONCURRENCY,
+    async (raw): Promise<SessionItem | null> => {
+      const uuid8 = raw.sessionId.slice(0, 8);
+      const indexEntry = index.get(uuid8);
+      const alias = getAlias(raw.sessionId);
+      const date = indexEntry?.date ?? raw.mtime.toISOString().slice(0, 10);
 
-    const folderIds = folderIdsMap.get(raw.sessionId) ?? [];
+      const folderIds = folderIdsMap.get(raw.sessionId) ?? [];
 
-    // Always try to recover the real cwd from the JSONL (folder-name decoding
-    // is lossy — dashes in path segments can't be distinguished from separators).
-    // Cache by mtime so we only pay the read once.
-    const mtimeMs = raw.mtime.getTime();
-    let cached = getCachedSummary(raw.sessionId);
-    // Heal previously-cached boilerplate titles: if the stored title is
-    // a continuation banner, re-parse with the current logic even when
-    // mtime is unchanged (one-time migration on first listing).
-    const staleTitle = cached ? looksLikeStaleBoilerplateTitle(cached.title) : false;
-    if (!cached || cached.mtime_ms !== mtimeMs || staleTitle) {
-      const extracted = await parseJsonlSummary(raw.filePath);
-      setCachedSummary(
-        raw.sessionId,
-        raw.filePath,
-        mtimeMs,
-        extracted.title,
-        extracted.summary,
-        extracted.cwd,
-      );
-      cached = {
-        title: extracted.title,
-        summary: extracted.summary,
-        cwd: extracted.cwd,
-        mtime_ms: mtimeMs,
-      };
-    }
+      // Always try to recover the real cwd from the JSONL (folder-name decoding
+      // is lossy — dashes in path segments can't be distinguished from separators).
+      // Cache by mtime so we only pay the read once.
+      const mtimeMs = raw.mtime.getTime();
+      let cached = getCachedSummary(raw.sessionId);
+      // Heal previously-cached boilerplate titles: if the stored title is
+      // a continuation banner, re-parse with the current logic even when
+      // mtime is unchanged (one-time migration on first listing).
+      const staleTitle = cached ? looksLikeStaleBoilerplateTitle(cached.title) : false;
+      if (!cached || cached.mtime_ms !== mtimeMs || staleTitle) {
+        const extracted = await parseJsonlSummary(raw.filePath);
+        setCachedSummary(
+          raw.sessionId,
+          raw.filePath,
+          mtimeMs,
+          extracted.title,
+          extracted.summary,
+          extracted.cwd,
+        );
+        cached = {
+          title: extracted.title,
+          summary: extracted.summary,
+          cwd: extracted.cwd,
+          mtime_ms: mtimeMs,
+        };
+      }
 
-    const projectPath = cached.cwd ?? raw.projectPath;
+      const projectPath = cached.cwd ?? raw.projectPath;
 
-    // When SESSIONS_INDEX.md covers the session, trust its title+description.
-    if (indexEntry) {
-      const title = alias ?? indexEntry.title;
+      // AI-title helper runs (`claude -p` summarizer) leave their own
+      // mini-JSONLs — they are machinery, not conversations. Hide them.
+      if (isAiTitleHelperText(cached.title)) return null;
+
+      const branchParentId = branchParents.get(raw.sessionId);
+
+      // When SESSIONS_INDEX.md covers the session, trust its title+description.
+      if (indexEntry) {
+        const title = alias ?? indexEntry.title;
+        return {
+          sessionId: raw.sessionId,
+          filePath: raw.filePath,
+          projectPath,
+          title,
+          ...(cached.title ? { parsedTitle: cached.title } : {}),
+          date,
+          folderIds,
+          ...(indexEntry.description ? { description: indexEntry.description } : {}),
+          ...(branchParentId ? { branchParentId } : {}),
+        };
+      }
+
+      const title = alias ?? cached.title ?? `session ${raw.sessionId.slice(0, 8)}`;
+      const description = cached.summary ?? undefined;
+
       return {
         sessionId: raw.sessionId,
         filePath: raw.filePath,
         projectPath,
         title,
+        ...(cached.title ? { parsedTitle: cached.title } : {}),
         date,
         folderIds,
-        ...(indexEntry.description ? { description: indexEntry.description } : {}),
+        ...(description ? { description } : {}),
+        ...(branchParentId ? { branchParentId } : {}),
       };
-    }
+    },
+  );
 
-    const title = alias ?? cached.title ?? `session ${raw.sessionId.slice(0, 8)}`;
-    const description = cached.summary ?? undefined;
-
-    return {
-      sessionId: raw.sessionId,
-      filePath: raw.filePath,
-      projectPath,
-      title,
-      date,
-      folderIds,
-      ...(description ? { description } : {}),
-    };
-  });
-
-  return items;
+  return items.filter((i): i is SessionItem => i !== null);
 }
 
 // ---------------------------------------------------------------------------

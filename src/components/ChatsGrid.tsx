@@ -307,15 +307,18 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
                 e.stopPropagation();
                 setMenuOpen(false);
                 // Branch = clone the chat into a sibling tile that shares
-                // context up to this point (claude --fork-session). Only
-                // available once a sessionId exists — log a hint otherwise.
-                const out = branchChat(props.chat.id);
-                if (!out) {
-                  console.warn(
-                    '[chat-tile] Branch unavailable: chat has no sessionId yet ' +
-                      '(send at least one message first so claude mints a session).',
-                  );
-                }
+                // context up to this point (claude --fork-session). Async:
+                // re-resolves the LIVE session id first so the fork carries
+                // everything said since the tile opened. Only available
+                // once a sessionId exists — log a hint otherwise.
+                void branchChat(props.chat.id).then((out) => {
+                  if (!out) {
+                    console.warn(
+                      '[chat-tile] Branch unavailable: chat has no sessionId yet ' +
+                        '(send at least one message first so claude mints a session).',
+                    );
+                  }
+                });
               }}
               title="Open a parallel copy of this chat sharing context (claude --fork-session)"
             >

@@ -136,6 +136,11 @@ export enum IPC {
   SummarizeSession = 'summarize_session',
   RenameClaudeSession = 'rename_claude_session',
 
+  // Session lineage / family tree
+  ResolveLiveSession = 'resolve_live_session',
+  ListSessionTree = 'list_session_tree',
+  RecordSessionLineage = 'record_session_lineage',
+
   // Folders
   ListFolders = 'list_folders',
   CreateFolder = 'create_folder',

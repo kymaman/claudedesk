@@ -24,9 +24,14 @@ export interface SessionItem {
   filePath: string;
   projectPath: string;
   title: string;
+  /** Title parsed from the first real prompt (line-2 material when an
+   *  alias/AI title occupies line 1) */
+  parsedTitle?: string;
   date: string;
   description?: string;
   folderIds: string[];
+  /** Session this one was explicitly branched from (⑂), if recorded */
+  branchParentId?: string;
 }
 
 export interface SessionPreview {

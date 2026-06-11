@@ -91,6 +91,13 @@ export function SessionsHistoryPanel(props: Props) {
   const [hoveredSession, setHoveredSession] = createSignal<SessionItem | null>(null);
   // Bulk AI-title progress label ("3/24") or null when idle.
   const [aiTitlesProgress, setAiTitlesProgress] = createSignal<string | null>(null);
+  // sessionId → display title across ALL sessions (not just filtered) —
+  // branch rows show «⑂ из <parent>» even when the parent is filtered out.
+  const sessionTitleById = createMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of sessions()) m.set(s.sessionId, s.title);
+    return m;
+  });
 
   /** Bulk: one-line AI titles for the visible sessions. force:false —
    *  sessions already carrying a manual alias are skipped server-side,
@@ -408,6 +415,12 @@ export function SessionsHistoryPanel(props: Props) {
               {(session) => (
                 <SessionRow
                   session={session}
+                  parentTitle={
+                    session.branchParentId
+                      ? (sessionTitleById().get(session.branchParentId) ??
+                        session.branchParentId.slice(0, 8))
+                      : undefined
+                  }
                   onClose={props.onClose ?? (() => {})}
                   onHover={(s) => setHoveredSession(s)}
                 />
@@ -653,6 +666,8 @@ function FolderRowCustom(props: {
 
 function SessionRow(props: {
   session: SessionItem;
+  /** Display title of the session this one was branched from (⑂) */
+  parentTitle?: string | undefined;
   onClose: () => void;
   onHover: (s: SessionItem) => void;
 }) {
@@ -901,8 +916,19 @@ function SessionRow(props: {
           {opening() ? '…' : '▶'}
         </button>
       </div>
-      <Show when={props.session.description}>
-        {(desc) => <div class="session-item__desc">{desc()}</div>}
+      {/* Line 2 (variant 2.1): what the dialog STARTED with — plus, for
+          branches, where it grew from. Line 1 stays the alias/AI title. */}
+      <Show when={props.parentTitle || props.session.description}>
+        <div class="session-item__desc">
+          <Show when={props.parentTitle}>
+            {(pt) => (
+              <span class="session-item__fork" title={`Ветка от: ${pt()}`}>
+                ⑂ из «{pt()}»{props.session.description ? ' · ' : ''}
+              </span>
+            )}
+          </Show>
+          {props.session.description ?? ''}
+        </div>
       </Show>
       <div class="session-item__meta">
         <Show when={props.session.folderIds.length > 0}>

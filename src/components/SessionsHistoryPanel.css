@@ -943,6 +943,12 @@
   opacity: 0.88;
 }
 
+/* «⑂ из <родителя>» prefix on branch rows (variant 2.1) */
+.session-item__fork {
+  color: var(--accent, #7dd3fc);
+  opacity: 0.95;
+}
+
 /* Bulk AI-titles button. Deliberately does NOT share the
    .sessions-panel__refresh class — e2e selectors (smoke.spec) target
    that class in strict mode and two matches break them. Shows "3/24"

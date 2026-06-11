@@ -91,9 +91,13 @@ import {
   deleteLaunchSettings,
   pinFolder,
   deleteSessionFile,
+  recordLineage,
+  getLineageOverrides,
+  getAlias,
 } from './session-history.js';
 import { loadSessionTranscript } from './session-transcript.js';
 import { summarizeSession } from './session-summarize.js';
+import { listSessionFamilies, resolveLiveSessionId } from './session-lineage.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
 import {
@@ -989,6 +993,41 @@ export function registerAllHandlers(win: BrowserWindow): void {
       ...(filePath !== undefined ? { filePath } : {}),
       force: Boolean(args?.force),
     });
+  });
+
+  // --- Session lineage / family tree ---
+
+  ipcMain.handle(IPC.ResolveLiveSession, async (_e, args) => {
+    assertString(args.sessionId, 'sessionId');
+    const sessionId = args.sessionId as string;
+    const sinceMs = typeof args?.sinceMs === 'number' ? args.sinceMs : Date.now();
+    const waitMs = typeof args?.waitMs === 'number' ? Math.min(args.waitMs, 300_000) : 0;
+    const res = await resolveLiveSessionId({ sessionId, sinceMs, waitMs });
+    if (res.changed) {
+      // The continuation is the same logical thread: record the edge and
+      // carry the user's name over so the new file isn't anonymous.
+      recordLineage(res.sessionId, sessionId, 'resume');
+      try {
+        const oldAlias = getAlias(sessionId);
+        if (oldAlias && !getAlias(res.sessionId)) {
+          await renameSession(res.sessionId, oldAlias);
+        }
+      } catch {
+        /* alias carry-over is best-effort */
+      }
+    }
+    return res;
+  });
+
+  ipcMain.handle(IPC.ListSessionTree, () =>
+    listSessionFamilies({ overrides: getLineageOverrides() }),
+  );
+
+  ipcMain.handle(IPC.RecordSessionLineage, (_e, args) => {
+    assertString(args.childId, 'childId');
+    assertString(args.parentId, 'parentId');
+    const kind = args?.kind === 'resume' ? 'resume' : 'fork';
+    recordLineage(args.childId as string, args.parentId as string, kind);
   });
 
   // --- Folders (History view organization) ---

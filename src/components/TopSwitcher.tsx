@@ -41,6 +41,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { id: 'history', label: 'History', hotkey: '⌃H' },
+  { id: 'tree', label: 'Tree', hotkey: '⌃T' },
   { id: 'chats', label: 'Chats', hotkey: '⌃K' },
   { id: 'projects', label: 'Projects', hotkey: '⌃P' },
   { id: 'branches', label: 'Branches', hotkey: '⌃⇧B' },

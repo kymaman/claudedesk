@@ -17,3 +17,5 @@ package-lock.json
 test-results/
 playwright-report/
 playwright-out.json
+.agents/
+skills-lock.json

@@ -21,6 +21,7 @@ import { homedir } from 'os';
 import fs from 'fs';
 import { loadSessionTranscript } from './session-transcript.js';
 import { renameSession, getAlias } from './session-history.js';
+import { AI_TITLE_HELPER_PREFIX } from './session-title.js';
 
 const SUMMARIZE_TIMEOUT_MS = 90_000;
 /** Transcript tail fed to the model — enough to know the topic, small
@@ -127,8 +128,11 @@ export async function summarizeSession(opts: {
   if (!plain) throw new Error('empty transcript');
   const tail = plain.length > TRANSCRIPT_TAIL_CHARS ? plain.slice(-TRANSCRIPT_TAIL_CHARS) : plain;
 
+  // The prefix doubles as the marker History uses to HIDE the helper
+  // run's own mini-JSONL — keep them in sync via the shared constant.
   const prompt =
-    'Ниже фрагмент диалога пользователя с ассистентом. Ответь ОДНОЙ короткой строкой ' +
+    AI_TITLE_HELPER_PREFIX +
+    '. Ответь ОДНОЙ короткой строкой ' +
     'на русском (максимум 8 слов): о чём этот диалог. Без кавычек, без точки в конце, ' +
     'без пояснений — только сама строка.\n\n---\n' +
     tail;

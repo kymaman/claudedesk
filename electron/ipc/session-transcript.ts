@@ -176,10 +176,17 @@ function resultPreview(raw: string | undefined): string {
 /** Strip claude's inline `⎿ Wrote N lines / 1.. 2..` preview dumps that
  *  sometimes get embedded inside a text block (quoted TUI output). */
 const PREVIEW_HEADER_RE = /^\s*⎿\s+(Wrote|Read|Edited|Updated|Created|Listed)\b/;
+// Loose shape — only trusted DIRECTLY under a `⎿ Wrote…` header, where
+// context proves the lines are a quoted file preview.
 const PREVIEW_NUMBERED_LINE_RE = /^\s+\d+\s/;
-const PREVIEW_NUMBERED_MULTILINE_RE = /^\s+\d+\s/m;
+// Strict cat -n shape (wide gutter: 4+ spaces, number, 2+ spaces) for
+// STANDALONE runs with no header. The loose regex here used to swallow
+// ordinary numbered lists inside real answers (« 1 установить пакет»)
+// — the user saw chunks of answers replaced by "[N hidden]".
+const STANDALONE_NUMBERED_LINE_RE = /^\s{4,}\d+\s{2,}/;
+const STANDALONE_NUMBERED_MULTILINE_RE = /^\s{4,}\d+\s{2,}/m;
 function collapseInlineToolPreviews(text: string): string {
-  if (!text || (!text.includes('⎿') && !PREVIEW_NUMBERED_MULTILINE_RE.test(text))) {
+  if (!text || (!text.includes('⎿') && !STANDALONE_NUMBERED_MULTILINE_RE.test(text))) {
     return text;
   }
   const lines = text.split(/\r?\n/);
@@ -212,10 +219,10 @@ function collapseInlineToolPreviews(text: string): string {
       if (hidden > 0) out.push(`   … [${hidden} preview line(s) hidden]`);
       continue;
     }
-    if (PREVIEW_NUMBERED_LINE_RE.test(line)) {
+    if (STANDALONE_NUMBERED_LINE_RE.test(line)) {
       let run = 0;
       const start = i;
-      while (i < lines.length && PREVIEW_NUMBERED_LINE_RE.test(lines[i])) {
+      while (i < lines.length && STANDALONE_NUMBERED_LINE_RE.test(lines[i])) {
         run += 1;
         i += 1;
       }

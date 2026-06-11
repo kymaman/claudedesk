@@ -89,7 +89,7 @@ describe('branchChat', () => {
     });
     expect(fresh).not.toBeNull();
     expect(fresh!.sessionId).toBeUndefined();
-    const out = m.branchChat(fresh!.id);
+    const out = await m.branchChat(fresh!.id);
     expect(out).toBeNull();
     // No tile was added.
     expect(m.openChats().length).toBe(1);
@@ -110,7 +110,7 @@ describe('branchChat', () => {
     m.openFreshChat({ cwd: '/tmp/trailing', title: 'Trailing' });
 
     const before = m.openChats().length;
-    const branched = m.branchChat(src!.id);
+    const branched = await m.branchChat(src!.id);
     expect(branched).not.toBeNull();
 
     // Distinct chat (new tile, new id) but same sessionId.
@@ -153,7 +153,7 @@ describe('branchChat', () => {
       skipPermissions: false,
     });
     m.renameChat(src!.id, 'Renamed source');
-    const branched = m.branchChat(src!.id);
+    const branched = await m.branchChat(src!.id);
     expect(branched!.title).toMatch(/^Renamed source • branch \d{2}:\d{2}$/);
   });
 
@@ -164,7 +164,7 @@ describe('branchChat', () => {
       extraFlags: [],
       skipPermissions: false,
     });
-    const branched = m.branchChat(src!.id);
+    const branched = await m.branchChat(src!.id);
     expect(branched!.forkParent).toBeTruthy();
     expect(branched!.forkParent!.sessionId).toBe(SESSION.sessionId);
     expect(branched!.forkParent!.title).toBe(SESSION.title);
@@ -178,7 +178,7 @@ describe('branchChat', () => {
       skipPermissions: false,
     });
     m.renameChat(src!.id, 'Renamed source');
-    const branched = m.branchChat(src!.id);
+    const branched = await m.branchChat(src!.id);
     expect(branched!.forkParent!.title).toBe('Renamed source');
   });
 });

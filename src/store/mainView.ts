@@ -6,7 +6,7 @@
 
 import { createPersistedSignal } from '../lib/persisted-signal';
 
-export type MainView = 'history' | 'branches' | 'agents' | 'chats' | 'projects';
+export type MainView = 'history' | 'branches' | 'agents' | 'chats' | 'projects' | 'tree';
 
 const VALID: ReadonlySet<MainView> = new Set([
   'history',
@@ -14,6 +14,7 @@ const VALID: ReadonlySet<MainView> = new Set([
   'agents',
   'chats',
   'projects',
+  'tree',
 ]);
 
 const [_mainView, setMainViewInternal] = createPersistedSignal<MainView>(

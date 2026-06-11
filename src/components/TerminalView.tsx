@@ -130,12 +130,13 @@ export function TerminalView(props: TerminalViewProps) {
       theme: getTerminalTheme(store.themePreset),
       allowProposedApi: true,
       scrollback: TERMINAL_SCROLLBACK_LINES,
-      // Wheel ticks default to 1 line each — user reported "scrollback
-      // only moves a tiny bit". 5/15 gives ~5 lines per normal tick and
-      // ~15 lines per Shift+wheel "fast scroll" tick, so a few spins
-      // walks ~hundreds of lines instead of ~tens.
-      scrollSensitivity: 5,
-      fastScrollSensitivity: 15,
+      // Wheel speed history: default 1 line/tick felt like "scrollback
+      // only moves a tiny bit"; 5/tick made lines visibly JUMP so the
+      // user lost his reading position. 3/tick + smooth animation keeps
+      // the speed but glides through every line instead of skipping.
+      scrollSensitivity: 3,
+      fastScrollSensitivity: 12,
+      smoothScrollDuration: 120,
     });
 
     fitAddon = new FitAddon();

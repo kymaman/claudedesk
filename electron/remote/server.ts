@@ -19,6 +19,7 @@ import {
   onPtyEvent,
 } from '../ipc/pty.js';
 import { parseClientMessage, type ServerMessage, type RemoteAgent } from './protocol.js';
+import { isOriginAllowed } from './origin.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -126,6 +127,8 @@ export function startRemoteServer(opts: {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy':
+      "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
   };
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -220,6 +223,12 @@ export function startRemoteServer(opts: {
     verifyClient: (info, cb) => {
       if (wss.clients.size >= 10) {
         cb(false, 429, 'Too many connections');
+        return;
+      }
+      // Reject cross-origin WebSocket upgrades (CSWSH protection).
+      // Browsers always send Origin; non-browser clients may omit it.
+      if (!isOriginAllowed(info.req.headers.origin, info.req.headers.host)) {
+        cb(false, 403, 'Forbidden origin');
         return;
       }
       // Also accept token in URL query for backward compatibility, but

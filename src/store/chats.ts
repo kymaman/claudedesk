@@ -291,8 +291,8 @@ function watchLiveSession(chatId: string): void {
       if (!res?.changed) return;
       adoptLiveSessionId(chatId, originalSid, res.sessionId);
     })
-    .catch(() => {
-      /* lineage tracking is best-effort — the tile keeps working */
+    .catch((err) => {
+      console.warn('[chats] watch live session failed:', err);
     });
 }
 
@@ -319,8 +319,8 @@ function adoptLiveSessionId(chatId: string, fromSid: string, liveSid: string): v
       childId: liveSid,
       parentId: cur.forkParent.sessionId,
       kind: 'fork',
-    }).catch(() => {
-      /* best-effort */
+    }).catch((err) => {
+      console.warn('[chats] record lineage failed:', err);
     });
   }
 }
@@ -482,7 +482,9 @@ export function closeChat(chatId: string): void {
   // the user can re-resume from History anytime.
   const chat = _chats().find((c) => c.id === chatId);
   if (chat && chat.projectId && !chat.sessionId) {
-    void invoke<undefined>(IPC.RemovePendingChat, { id: chatId }).catch(() => undefined);
+    void invoke<undefined>(IPC.RemovePendingChat, { id: chatId }).catch((err) => {
+      console.warn('[chats] remove pending chat failed:', err);
+    });
   }
   _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, closed: true } : c)));
   schedulePersistOpenChats();
@@ -541,8 +543,8 @@ export async function branchChat(chatId: string): Promise<Chat | null> {
         adoptLiveSessionId(src.id, src.sessionId, res.sessionId);
         forkFromSid = res.sessionId;
       }
-    } catch {
-      /* fall back to the recorded id */
+    } catch (err) {
+      console.warn('[chats] branch: resolve live session failed:', err);
     }
   }
 
@@ -749,8 +751,8 @@ function persistOpenChats(): void {
       }))
       .slice(0, MAX_PERSISTED);
     localStorage.setItem(PERSIST_KEY, JSON.stringify(snapshot));
-  } catch {
-    /* storage full or unavailable */
+  } catch (err) {
+    console.warn('[chats] persist open chats failed:', err);
   }
 }
 
@@ -810,7 +812,8 @@ export function restoreOpenChats(): void {
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(PERSIST_KEY);
-  } catch {
+  } catch (err) {
+    console.warn('[chats] restore: localStorage unavailable:', err);
     return;
   }
   if (!raw) return;
@@ -826,7 +829,8 @@ export function restoreOpenChats(): void {
         typeof p.cwd === 'string' &&
         typeof p.agentDefId === 'string',
     );
-  } catch {
+  } catch (err) {
+    console.warn('[chats] restore: parse persisted chats failed:', err);
     return;
   }
   if (list.length === 0) return;

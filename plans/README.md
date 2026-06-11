@@ -15,7 +15,7 @@ pick for the next round.
 | ---- | ------------------------------------------------------------ | -------- | ------ | ---------------- | ------ |
 | 001  | Cache + parallelize session-lineage scan (Tree tab perf)     | P1       | M      | —                | DONE   |
 | 002  | Remote-access hardening: Origin check, sessionStorage, CSP   | P1       | S      | —                | DONE   |
-| 003  | Make silent catch blocks observable (chats, session-history) | P2       | S      | —                | TODO   |
+| 003  | Make silent catch blocks observable (chats, session-history) | P2       | S      | —                | DONE   |
 | 004  | Run unit tests in CI + raise vitest timeout                  | P2       | S      | —                | TODO   |
 | 005  | De-sleep the 4 flakiest e2e specs                            | P3       | M      | better after 004 | TODO   |
 

@@ -113,8 +113,8 @@ function getDb(): Database.Database {
     if (!summaryCols.some((c) => c.name === 'cwd')) {
       _db.exec('ALTER TABLE session_summaries ADD COLUMN cwd TEXT');
     }
-  } catch {
-    /* best-effort migration */
+  } catch (err) {
+    console.warn('[session-history] migrate schema failed:', err);
   }
   _db.exec(`
     CREATE TABLE IF NOT EXISTS session_launch_settings (
@@ -196,8 +196,8 @@ export function getLaunchSettings(sessionId: string): LaunchSettings | null {
     if (Array.isArray(parsed)) {
       flags = parsed.filter((f: unknown): f is string => typeof f === 'string');
     }
-  } catch {
-    /* fallthrough with empty flags */
+  } catch (err) {
+    console.warn('[session-history] parse launch settings flags failed:', err);
   }
   return {
     agentId: row.agent_id,
@@ -415,7 +415,8 @@ function parseSessionsIndex(): Map<string, IndexEntry> {
   let content: string;
   try {
     content = fs.readFileSync(INDEX_PATH, 'utf-8');
-  } catch {
+  } catch (err) {
+    console.warn('[session-history] read sessions index failed:', err);
     return map;
   }
 
@@ -468,7 +469,8 @@ function scanFolder(rootDir: string): RawSession[] {
   let projectDirs: string[];
   try {
     projectDirs = fs.readdirSync(rootDir);
-  } catch {
+  } catch (err) {
+    console.warn('[session-history] scan folder: readdir root failed:', err);
     return results;
   }
 
@@ -477,7 +479,8 @@ function scanFolder(rootDir: string): RawSession[] {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(projectDirPath);
-    } catch {
+    } catch (err) {
+      console.warn('[session-history] scan folder: stat project dir failed:', err);
       continue;
     }
     if (!stat.isDirectory()) continue;
@@ -486,7 +489,8 @@ function scanFolder(rootDir: string): RawSession[] {
     let files: string[];
     try {
       files = fs.readdirSync(projectDirPath);
-    } catch {
+    } catch (err) {
+      console.warn('[session-history] scan folder: readdir project failed:', err);
       continue;
     }
 
@@ -497,7 +501,8 @@ function scanFolder(rootDir: string): RawSession[] {
       let fileStat: fs.Stats;
       try {
         fileStat = fs.statSync(filePath);
-      } catch {
+      } catch (err) {
+        console.warn('[session-history] scan folder: stat session file failed:', err);
         continue;
       }
       results.push({ sessionId, filePath, projectPath, mtime: fileStat.mtime });
@@ -588,7 +593,8 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
     let stream: fs.ReadStream;
     try {
       stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
-    } catch {
+    } catch (err) {
+      console.warn('[session-history] parse jsonl summary: open file failed:', err);
       resolve(result);
       return;
     }
@@ -658,7 +664,7 @@ async function parseJsonlSummary(filePath: string): Promise<ExtractedSummary> {
           }
         }
       } catch {
-        // Skip malformed line
+        /* expected: malformed line */
       }
     });
 

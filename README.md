@@ -72,7 +72,7 @@ Any custom path? Agents tab → **Custom agents** → add your binary with a nam
 
 ### macOS / Linux
 
-Inherited from the upstream project (parallel-code supports both). Building from source works; pre-built DMG / AppImage are not published yet.
+Inherited from the upstream project (parallel-code supports both). CI builds a DMG (macOS) and AppImage (Linux) for every `v*` tag — grab them from [Releases](https://github.com/kymaman/claudedesk/releases/latest). They are less battle-tested than the Windows build.
 
 ## Build from source
 

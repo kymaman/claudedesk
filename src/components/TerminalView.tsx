@@ -19,6 +19,8 @@ import { filterArgsBySupport } from '../lib/agent-args-filter';
 import { listenXtermBridge } from '../lib/xterm-bridge';
 import { classifyInjectedText } from '../lib/injected-text';
 import { resolveFileLink } from '../lib/file-link-resolve';
+import { extractFileLinkCandidates, stripLineColSuffix } from '../lib/terminal-file-links';
+import { createResizeCoalescer } from '../lib/terminal-resize-coalescer';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
 import { shouldWriteTranscript } from '../lib/transcript-prefill';
 import { planWheelScroll } from '../lib/terminal-wheel';
@@ -260,24 +262,9 @@ export function TerminalView(props: TerminalViewProps) {
           return;
         }
         const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? '';
-        // Match file paths: absolute, ./ or ../ relative, and bare relative with /
-        // Supports @scoped packages, line:col suffixes like foo.ts:42:10
-        const regex =
-          /(?:\/[\w@./-]+|\.{1,2}\/[\w@./-]+|[\w@][\w@./-]*\/[\w@./-]+)(?::\d+(?::\d+)?)?/g;
-        const links: { startIndex: number; length: number; text: string }[] = [];
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(line)) !== null) {
-          // Strip trailing punctuation that's not part of the path
-          const text = match[0].replace(/[.,;:!?)]+$/, '');
-          if (!text) continue;
-          // Must contain a dot somewhere (file extension) to avoid matching plain directories
-          if (!text.includes('.')) continue;
-          links.push({
-            startIndex: match.index,
-            length: text.length,
-            text,
-          });
-        }
+        // Matching rules (incl. Windows drive paths) live in
+        // terminal-file-links.ts so they're unit-testable.
+        const links = extractFileLinkCandidates(line);
         callback(
           links.map((link) => ({
             range: {
@@ -290,7 +277,7 @@ export function TerminalView(props: TerminalViewProps) {
               const modifierHeld = isMac ? event.metaKey : event.ctrlKey;
               if (!modifierHeld) return;
               // Strip line:col suffix for opening
-              const filePath = link.text.replace(/:\d+(:\d+)?$/, '');
+              const filePath = stripLineColSuffix(link.text);
               const resolved = resolveFileLink(filePath, props.cwd);
               // .md files open in viewer; Shift held = open externally instead
               if (/\.md$/i.test(resolved) && props.onFileLink && !event.shiftKey) {
@@ -844,28 +831,16 @@ export function TerminalView(props: TerminalViewProps) {
       enqueueInput(data);
     });
 
-    let resizeFlushTimer: number | undefined;
-    let pendingResize: { cols: number; rows: number } | null = null;
-    let lastSentCols = -1;
-    let lastSentRows = -1;
-
-    function flushPendingResize() {
-      if (!pendingResize) return;
-      const { cols, rows } = pendingResize;
-      pendingResize = null;
-      if (cols === lastSentCols && rows === lastSentRows) return;
-      lastSentCols = cols;
-      lastSentRows = rows;
+    // Claude Code repaints the whole transcript on every PTY resize, and
+    // each repaint leaves a stale copy in scrollback ("скомканная история"
+    // in long sessions). Coalesce: the PTY hears the FINAL size of a drag
+    // / grid reflow, with a 1s heartbeat during continuous resizes.
+    const resizeCoalescer = createResizeCoalescer((cols, rows) => {
       fireAndForget(IPC.ResizeAgent, { agentId, cols, rows });
-    }
+    });
 
     term.onResize(({ cols, rows }) => {
-      pendingResize = { cols, rows };
-      if (resizeFlushTimer !== undefined) return;
-      resizeFlushTimer = window.setTimeout(() => {
-        resizeFlushTimer = undefined;
-        flushPendingResize();
-      }, 33);
+      resizeCoalescer.push(cols, rows);
     });
 
     // Only disable cursor blink for non-focused terminals to save one RAF
@@ -1037,9 +1012,9 @@ export function TerminalView(props: TerminalViewProps) {
 
     onCleanup(() => {
       flushPendingInput();
-      flushPendingResize();
+      // No final-resize flush: the PTY is killed right below anyway.
+      resizeCoalescer.dispose();
       if (inputFlushTimer !== undefined) clearTimeout(inputFlushTimer);
-      if (resizeFlushTimer !== undefined) clearTimeout(resizeFlushTimer);
       if (outputRaf !== undefined) cancelAnimationFrame(outputRaf);
       if (whisperFlushInterval !== undefined) clearInterval(whisperFlushInterval);
       onOutput.cleanup?.();

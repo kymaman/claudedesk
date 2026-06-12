@@ -20,7 +20,7 @@ import path from 'path';
 import { homedir } from 'os';
 import fs from 'fs';
 import { loadSessionTranscript } from './session-transcript.js';
-import { renameSession, getAlias } from './session-history.js';
+import { renameSession, getAlias, getAiSummary, setAiSummary } from './session-history.js';
 import { AI_TITLE_HELPER_PREFIX } from './session-title.js';
 
 const SUMMARIZE_TIMEOUT_MS = 90_000;
@@ -28,6 +28,7 @@ const SUMMARIZE_TIMEOUT_MS = 90_000;
  *  enough to keep haiku latency ~seconds. */
 const TRANSCRIPT_TAIL_CHARS = 7_000;
 const MAX_TITLE_CHARS = 80;
+const MAX_DESCRIPTION_CHARS = 220;
 
 // eslint-disable-next-line no-control-regex -- stripping ANSI escapes from transcript
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
@@ -102,8 +103,32 @@ export function cleanTitleLine(raw: string): string {
     : unquoted;
 }
 
+/**
+ * Split claude's raw two-line answer into {title, description}.
+ * Line 1 → title (cleaned exactly like before), everything after the
+ * first non-empty line → description, length-capped. Tolerates a
+ * single-line answer (description stays '').
+ */
+export function parseTitleAndDescription(raw: string): { title: string; description: string } {
+  const lines = raw.split(/\r?\n/).map((l) => l.trim());
+  const firstIdx = lines.findIndex((l) => l.length > 0);
+  const title = cleanTitleLine(raw);
+  const rest = firstIdx >= 0 ? lines.slice(firstIdx + 1).filter((l) => l.length > 0) : [];
+  let description = rest
+    .join(' ')
+    .replace(/^["'«]+/, '')
+    .replace(/["'»]+$/, '')
+    .trim();
+  if (description.length > MAX_DESCRIPTION_CHARS) {
+    description = description.slice(0, MAX_DESCRIPTION_CHARS - 1).trimEnd() + '…';
+  }
+  return { title, description };
+}
+
 export interface SummarizeResult {
   title: string;
+  /** AI description ('' when the model gave only a title). */
+  description?: string;
   /** true when an existing manual alias was left untouched. */
   skipped: boolean;
 }
@@ -116,7 +141,10 @@ export async function summarizeSession(opts: {
   force?: boolean;
 }): Promise<SummarizeResult> {
   const existing = getAlias(opts.sessionId);
-  if (existing && !opts.force) {
+  // Bulk-mode skip only when BOTH the name and the description already
+  // exist — a manually-renamed session without a description still gets
+  // its description generated (the manual name stays untouched below).
+  if (existing && !opts.force && getAiSummary(opts.sessionId)) {
     return { title: existing, skipped: true };
   }
 
@@ -132,15 +160,20 @@ export async function summarizeSession(opts: {
   // run's own mini-JSONL — keep them in sync via the shared constant.
   const prompt =
     AI_TITLE_HELPER_PREFIX +
-    '. Ответь ОДНОЙ короткой строкой ' +
-    'на русском (максимум 8 слов): о чём этот диалог. Без кавычек, без точки в конце, ' +
-    'без пояснений — только сама строка.\n\n---\n' +
+    '. Ответь ДВУМЯ строками на русском. ' +
+    'Строка 1: короткое название (максимум 8 слов): о чём этот диалог. ' +
+    'Строка 2: описание одним-двумя предложениями (максимум 200 знаков): что обсуждалось и чем закончилось. ' +
+    'Без кавычек, без пояснений, без префиксов вроде «Название:» — только эти две строки.\n\n---\n' +
     tail;
 
   const raw = await runClaudeHeadless(prompt);
-  const title = cleanTitleLine(raw);
+  const { title, description } = parseTitleAndDescription(raw);
   if (!title) throw new Error('claude returned no usable title');
 
-  await renameSession(opts.sessionId, title);
-  return { title, skipped: false };
+  // Keep a manual alias unless force — but still persist the description.
+  if (!existing || opts.force) {
+    await renameSession(opts.sessionId, title);
+  }
+  if (description) setAiSummary(opts.sessionId, description);
+  return { title: existing && !opts.force ? existing : title, description, skipped: false };
 }

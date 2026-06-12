@@ -113,6 +113,12 @@ function getDb(): Database.Database {
     if (!summaryCols.some((c) => c.name === 'cwd')) {
       _db.exec('ALTER TABLE session_summaries ADD COLUMN cwd TEXT');
     }
+    // AI-generated description ("о чём диалог", 1-2 sentences). Kept in a
+    // SEPARATE column from `summary` (heuristic JSONL extract) so an
+    // mtime-triggered re-parse never clobbers the paid-for AI text.
+    if (!summaryCols.some((c) => c.name === 'ai_summary')) {
+      _db.exec('ALTER TABLE session_summaries ADD COLUMN ai_summary TEXT');
+    }
   } catch (err) {
     console.warn('[session-history] migrate schema failed:', err);
   }
@@ -221,6 +227,7 @@ export function deleteLaunchSettings(sessionId: string): void {
 interface CachedSummary {
   title: string | null;
   summary: string | null;
+  ai_summary: string | null;
   cwd: string | null;
   mtime_ms: number;
 }
@@ -230,8 +237,16 @@ function getCachedSummary(sessionId: string): CachedSummary | null {
   const row = db
     .prepare<
       [string],
-      { title: string | null; summary: string | null; cwd: string | null; mtime_ms: number }
-    >('SELECT title, summary, cwd, mtime_ms FROM session_summaries WHERE session_id = ?')
+      {
+        title: string | null;
+        summary: string | null;
+        ai_summary: string | null;
+        cwd: string | null;
+        mtime_ms: number;
+      }
+    >(
+      'SELECT title, summary, ai_summary, cwd, mtime_ms FROM session_summaries WHERE session_id = ?',
+    )
     .get(sessionId);
   return row ?? null;
 }
@@ -245,9 +260,46 @@ function setCachedSummary(
   cwd: string | null,
 ): void {
   const db = getDb();
+  // Upsert (NOT INSERT OR REPLACE): a replace would null out ai_summary
+  // every time the JSONL's mtime changes and the heuristic re-parse runs.
   db.prepare(
-    'INSERT OR REPLACE INTO session_summaries (session_id, file_path, mtime_ms, title, summary, cwd, cached_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    `INSERT INTO session_summaries (session_id, file_path, mtime_ms, title, summary, cwd, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       file_path = excluded.file_path,
+       mtime_ms  = excluded.mtime_ms,
+       title     = excluded.title,
+       summary   = excluded.summary,
+       cwd       = excluded.cwd,
+       cached_at = excluded.cached_at`,
   ).run(sessionId, filePath, mtimeMs, title, summary, cwd, Date.now());
+}
+
+/** AI-generated description for a session, or null when none stored. */
+export function getAiSummary(sessionId: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare<
+      [string],
+      { ai_summary: string | null }
+    >('SELECT ai_summary FROM session_summaries WHERE session_id = ?')
+    .get(sessionId);
+  return row?.ai_summary ?? null;
+}
+
+/** Persist an AI-generated description. Creates a stub row when the
+ *  session was never listed (mtime 0 forces a re-parse on next listing,
+ *  which the upsert above performs without touching ai_summary). */
+export function setAiSummary(sessionId: string, text: string): void {
+  const db = getDb();
+  const res = db
+    .prepare('UPDATE session_summaries SET ai_summary = ? WHERE session_id = ?')
+    .run(text, sessionId);
+  if (res.changes === 0) {
+    db.prepare(
+      'INSERT INTO session_summaries (session_id, file_path, mtime_ms, title, summary, cwd, ai_summary, cached_at) VALUES (?, ?, 0, NULL, NULL, NULL, ?, ?)',
+    ).run(sessionId, '', text, Date.now());
+  }
 }
 
 export function getAlias(sessionId: string): string | null {
@@ -743,6 +795,9 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
         cached = {
           title: extracted.title,
           summary: extracted.summary,
+          // The upsert leaves ai_summary untouched in the DB — mirror that
+          // in the in-memory copy so this listing keeps the AI description.
+          ai_summary: cached?.ai_summary ?? null,
           cwd: extracted.cwd,
           mtime_ms: mtimeMs,
         };
@@ -767,13 +822,15 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
           ...(cached.title ? { parsedTitle: cached.title } : {}),
           date,
           folderIds,
-          ...(indexEntry.description ? { description: indexEntry.description } : {}),
+          ...(cached.ai_summary || indexEntry.description
+            ? { description: cached.ai_summary || indexEntry.description }
+            : {}),
           ...(branchParentId ? { branchParentId } : {}),
         };
       }
 
       const title = alias ?? cached.title ?? `session ${raw.sessionId.slice(0, 8)}`;
-      const description = cached.summary ?? undefined;
+      const description = cached.ai_summary ?? cached.summary ?? undefined;
 
       return {
         sessionId: raw.sessionId,

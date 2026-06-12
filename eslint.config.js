@@ -105,6 +105,10 @@ export default [
         __dirname: 'readonly',
         __filename: 'readonly',
         process: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        Buffer: 'readonly',
       },
     },
     rules: {

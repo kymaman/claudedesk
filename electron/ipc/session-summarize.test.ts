@@ -23,23 +23,31 @@ import os from 'os';
 import path from 'path';
 
 const renameCalls: Array<{ sessionId: string; alias: string }> = [];
+const aiSummaryCalls: Array<{ sessionId: string; text: string }> = [];
 let aliasReturn: string | null = null;
+let aiSummaryReturn: string | null = null;
 
 vi.mock('./session-history.js', () => ({
   renameSession: vi.fn(async (sessionId: string, alias: string) => {
     renameCalls.push({ sessionId, alias });
   }),
   getAlias: vi.fn(() => aliasReturn),
+  getAiSummary: vi.fn(() => aiSummaryReturn),
+  setAiSummary: vi.fn((sessionId: string, text: string) => {
+    aiSummaryCalls.push({ sessionId, text });
+  }),
 }));
 
-import { cleanTitleLine, summarizeSession } from './session-summarize.js';
+import { cleanTitleLine, parseTitleAndDescription, summarizeSession } from './session-summarize.js';
 
 const CLAUDE_BIN = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
 const HAS_CLAUDE = process.platform === 'win32' ? fs.existsSync(CLAUDE_BIN) : true;
 
 beforeEach(() => {
   renameCalls.length = 0;
+  aiSummaryCalls.length = 0;
   aliasReturn = null;
+  aiSummaryReturn = null;
 });
 
 describe('cleanTitleLine', () => {
@@ -64,11 +72,62 @@ describe('cleanTitleLine', () => {
   });
 });
 
+describe('parseTitleAndDescription', () => {
+  it('splits a two-line answer into title + description', () => {
+    const res = parseTitleAndDescription(
+      'Настройка бэкапа\nОбсудили rsync и cron, задание работает',
+    );
+    expect(res.title).toBe('Настройка бэкапа');
+    expect(res.description).toBe('Обсудили rsync и cron, задание работает');
+  });
+
+  it('joins multi-line descriptions and strips wrapping quotes', () => {
+    const res = parseTitleAndDescription('«Заголовок»\n"Первая часть\nвторая часть."');
+    expect(res.title).toBe('Заголовок');
+    expect(res.description).toBe('Первая часть вторая часть.');
+  });
+
+  it('tolerates a single-line answer (empty description)', () => {
+    const res = parseTitleAndDescription('Только заголовок');
+    expect(res.title).toBe('Только заголовок');
+    expect(res.description).toBe('');
+  });
+
+  it('caps the description at 220 chars with an ellipsis', () => {
+    const res = parseTitleAndDescription('Заголовок\n' + 'б'.repeat(400));
+    expect(res.description.length).toBeLessThanOrEqual(220);
+    expect(res.description.endsWith('…')).toBe(true);
+  });
+
+  it('skips leading blank lines before the title', () => {
+    const res = parseTitleAndDescription('\n\nЗаголовок\nОписание');
+    expect(res.title).toBe('Заголовок');
+    expect(res.description).toBe('Описание');
+  });
+});
+
 describe('summarizeSession behavior', () => {
-  it('skips when a manual alias exists and force=false (bulk mode safety)', async () => {
+  it('skips when alias AND description already exist with force=false (bulk mode safety)', async () => {
     aliasReturn = 'ручное имя';
+    aiSummaryReturn = 'уже есть описание';
     const res = await summarizeSession({ sessionId: 'any', force: false });
     expect(res).toEqual({ title: 'ручное имя', skipped: true });
+    expect(renameCalls).toEqual([]);
+    expect(aiSummaryCalls).toEqual([]);
+  });
+
+  it('does NOT skip an aliased session missing its description (but rejects later on empty transcript)', async () => {
+    aliasReturn = 'ручное имя';
+    aiSummaryReturn = null;
+    // Proceeds past the skip-guard into transcript loading, which fails
+    // for the missing file — proving the guard no longer short-circuits.
+    await expect(
+      summarizeSession({
+        sessionId: 'no-such-session-abc',
+        filePath: path.join(os.tmpdir(), 'definitely-missing-67890.jsonl'),
+        force: false,
+      }),
+    ).rejects.toThrow();
     expect(renameCalls).toEqual([]);
   });
 
@@ -145,6 +204,14 @@ describe('REAL smoke — actual claude -p haiku over a real JSONL', () => {
         expect(renameCalls).toEqual([
           { sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', alias: res.title },
         ]);
+        // The two-line prompt should also yield a description, persisted
+        // via setAiSummary. (Model output isn't guaranteed, so only assert
+        // persistence when a description actually came back.)
+        if (res.description) {
+          expect(aiSummaryCalls).toEqual([
+            { sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', text: res.description },
+          ]);
+        }
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }

@@ -79,13 +79,17 @@ export async function summarizeSessionAction(
   opts: { force?: boolean } = {},
 ): Promise<string | null> {
   try {
-    const res = await invoke<{ title: string; skipped: boolean }>(IPC.SummarizeSession, {
-      sessionId,
-      force: opts.force ?? true,
-    });
+    const res = await invoke<{ title: string; description?: string; skipped: boolean }>(
+      IPC.SummarizeSession,
+      { sessionId, force: opts.force ?? true },
+    );
     if (!res?.title) return null;
     setSessions((prev) =>
-      prev.map((s) => (s.sessionId === sessionId ? { ...s, title: res.title } : s)),
+      prev.map((s) =>
+        s.sessionId === sessionId
+          ? { ...s, title: res.title, ...(res.description ? { description: res.description } : {}) }
+          : s,
+      ),
     );
     if (!res.skipped) {
       const open = openChats().find((c) => c.sessionId === sessionId);

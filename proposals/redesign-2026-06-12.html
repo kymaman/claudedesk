@@ -1,0 +1,1966 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClaudeDesk — предложения по редизайну · 12.06.2026</title>
+    <style>
+      /* ============ БАЗА ============ */
+      :root {
+        --bg: #0d1117;
+        --bg2: #161b22;
+        --bg3: #1c2330;
+        --panel: #11161f;
+        --border: #2a3344;
+        --border-soft: #222a38;
+        --text: #d7dee8;
+        --text-dim: #8b96a8;
+        --text-faint: #5b6678;
+        --accent: #d97a4a; /* тёплый оранжевый — клод */
+        --accent-soft: rgba(217, 122, 74, 0.14);
+        --green: #4ec77f;
+        --green-soft: rgba(78, 199, 127, 0.13);
+        --blue: #5aa7e8;
+        --blue-soft: rgba(90, 167, 232, 0.13);
+        --yellow: #e8c35a;
+        --yellow-soft: rgba(232, 195, 90, 0.13);
+        --red: #e86a6a;
+        --red-soft: rgba(232, 106, 106, 0.13);
+        --purple: #a78ae8;
+        --purple-soft: rgba(167, 138, 232, 0.13);
+        --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+        --radius: 10px;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          'Segoe UI',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      ::selection {
+        background: var(--accent-soft);
+      }
+
+      /* ============ РАСКЛАДКА ============ */
+      .layout {
+        display: flex;
+        min-height: 100vh;
+      }
+      nav.side {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        width: 240px;
+        flex-shrink: 0;
+        background: var(--panel);
+        border-right: 1px solid var(--border-soft);
+        padding: 28px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      nav.side .logo {
+        font-weight: 700;
+        font-size: 17px;
+        margin-bottom: 4px;
+        color: var(--text);
+      }
+      nav.side .logo span {
+        color: var(--accent);
+      }
+      nav.side .date {
+        font-size: 12px;
+        color: var(--text-faint);
+        margin-bottom: 24px;
+      }
+      nav.side a {
+        display: block;
+        padding: 8px 12px;
+        border-radius: 8px;
+        color: var(--text-dim);
+        text-decoration: none;
+        font-size: 14px;
+        transition:
+          background 0.15s,
+          color 0.15s;
+        border-left: 2px solid transparent;
+      }
+      nav.side a:hover {
+        background: var(--bg3);
+        color: var(--text);
+      }
+      nav.side a.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-left-color: var(--accent);
+      }
+      nav.side .foot {
+        margin-top: auto;
+        font-size: 11px;
+        color: var(--text-faint);
+        line-height: 1.5;
+      }
+
+      main {
+        flex: 1;
+        max-width: 1100px;
+        padding: 40px 48px 120px;
+      }
+
+      section {
+        margin-bottom: 90px;
+        scroll-margin-top: 30px;
+      }
+      h1 {
+        font-size: 30px;
+        font-weight: 700;
+        margin-bottom: 10px;
+        letter-spacing: -0.5px;
+      }
+      h2 {
+        font-size: 23px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        letter-spacing: -0.3px;
+      }
+      h2 .num {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--accent);
+        background: var(--accent-soft);
+        padding: 3px 10px;
+        border-radius: 999px;
+      }
+      h3 {
+        font-size: 17px;
+        font-weight: 650;
+        margin: 22px 0 10px;
+      }
+      .lead {
+        color: var(--text-dim);
+        margin-bottom: 26px;
+        max-width: 760px;
+      }
+      .lead b {
+        color: var(--text);
+      }
+      p.note {
+        font-size: 13px;
+        color: var(--text-faint);
+        margin-top: 10px;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.88em;
+        background: var(--bg3);
+        padding: 2px 6px;
+        border-radius: 5px;
+        color: var(--yellow);
+      }
+
+      /* ============ ШАПКА ============ */
+      header.hero {
+        margin-bottom: 70px;
+        padding: 34px 36px;
+        background: linear-gradient(135deg, var(--bg2), var(--bg3));
+        border: 1px solid var(--border-soft);
+        border-radius: 16px;
+      }
+      header.hero p {
+        color: var(--text-dim);
+        max-width: 720px;
+        margin-top: 8px;
+      }
+      .pains {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      .pain {
+        font-size: 13px;
+        padding: 7px 14px;
+        border-radius: 999px;
+        background: var(--red-soft);
+        color: #f0a0a0;
+        border: 1px solid rgba(232, 106, 106, 0.25);
+      }
+
+      /* ============ МОКАПЫ (общее) ============ */
+      .mock {
+        background: #0a0e14;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        font-size: 11px;
+        user-select: none;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+      }
+      .mock-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #131922;
+        border-bottom: 1px solid var(--border-soft);
+        color: var(--text-faint);
+        font-size: 11px;
+      }
+      .dots {
+        display: flex;
+        gap: 5px;
+      }
+      .dots i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        display: block;
+      }
+      .dots i:nth-child(1) {
+        background: #e86a6a;
+      }
+      .dots i:nth-child(2) {
+        background: #e8c35a;
+      }
+      .dots i:nth-child(3) {
+        background: #4ec77f;
+      }
+
+      .m-tabs {
+        display: flex;
+        gap: 2px;
+        padding: 6px 10px;
+        background: #10151d;
+        border-bottom: 1px solid var(--border-soft);
+        align-items: center;
+      }
+      .m-tab {
+        padding: 4px 11px;
+        border-radius: 6px;
+        color: var(--text-faint);
+      }
+      .m-tab.on {
+        background: var(--bg3);
+        color: var(--text);
+      }
+      .m-gear {
+        margin-left: auto;
+        color: var(--text-faint);
+      }
+      .m-chips {
+        display: flex;
+        gap: 6px;
+        padding: 6px 10px;
+        background: #0e131b;
+        border-bottom: 1px solid var(--border-soft);
+        overflow: hidden;
+      }
+      .m-chip {
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--bg3);
+        color: var(--text-dim);
+        border: 1px solid var(--border-soft);
+        white-space: nowrap;
+      }
+      .m-chip.on {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: rgba(217, 122, 74, 0.35);
+      }
+      .m-ask {
+        margin-left: auto;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--blue-soft);
+        color: var(--blue);
+        white-space: nowrap;
+      }
+
+      .m-body {
+        display: flex;
+        min-height: 230px;
+      }
+      .m-left {
+        width: 130px;
+        background: #0c1117;
+        border-right: 1px solid var(--border-soft);
+        padding: 8px;
+        flex-shrink: 0;
+      }
+      .m-left .folder {
+        padding: 4px 7px;
+        border-radius: 6px;
+        color: var(--text-dim);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .m-left .folder.on {
+        background: var(--bg3);
+        color: var(--text);
+      }
+      .m-main {
+        flex: 1;
+        padding: 8px 10px;
+      }
+      .m-row {
+        padding: 6px 9px;
+        border-radius: 7px;
+        margin-bottom: 4px;
+        background: #11161f;
+        border: 1px solid var(--border-soft);
+      }
+      .m-row .t {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .m-row .d {
+        color: var(--text-faint);
+        font-size: 10px;
+      }
+      .m-row.indent {
+        margin-left: 22px;
+        border-left: 2px solid var(--border);
+      }
+
+      .m-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 7px;
+        padding: 10px;
+        flex: 1;
+      }
+      .m-term {
+        background: #0b0f15;
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        padding: 7px 9px;
+        font-family: var(--mono);
+        font-size: 9.5px;
+        color: var(--green);
+        min-height: 70px;
+        line-height: 1.55;
+        overflow: hidden;
+      }
+      .m-term .hdr {
+        color: var(--text-dim);
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 10px;
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .m-term .dimline {
+        color: var(--text-faint);
+      }
+
+      .cap {
+        font-size: 12.5px;
+        color: var(--text-faint);
+        margin-top: 10px;
+      }
+      .cap b {
+        color: var(--text-dim);
+      }
+
+      /* ============ КОНЦЕПТЫ ============ */
+      .concept-tabs {
+        display: flex;
+        gap: 10px;
+        margin: 22px 0 24px;
+        flex-wrap: wrap;
+      }
+      .concept-tab {
+        padding: 11px 20px;
+        border-radius: 12px;
+        cursor: pointer;
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        color: var(--text-dim);
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.18s;
+      }
+      .concept-tab:hover {
+        border-color: var(--border);
+        color: var(--text);
+      }
+      .concept-tab.on {
+        background: var(--accent-soft);
+        border-color: rgba(217, 122, 74, 0.4);
+        color: var(--accent);
+      }
+      .concept-tab small {
+        display: block;
+        font-weight: 400;
+        font-size: 11.5px;
+        color: var(--text-faint);
+      }
+      .concept {
+        display: none;
+        animation: fadein 0.25s ease;
+      }
+      .concept.show {
+        display: block;
+      }
+      @keyframes fadein {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .pros-cons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .pc {
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+      }
+      .pc h4 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 10px;
+      }
+      .pc.plus h4 {
+        color: var(--green);
+      }
+      .pc.minus h4 {
+        color: var(--yellow);
+      }
+      .pc ul {
+        list-style: none;
+      }
+      .pc li {
+        padding: 4px 0 4px 22px;
+        position: relative;
+        font-size: 13.5px;
+        color: var(--text-dim);
+      }
+      .pc.plus li::before {
+        content: '+';
+        position: absolute;
+        left: 4px;
+        color: var(--green);
+        font-weight: 700;
+      }
+      .pc.minus li::before {
+        content: '−';
+        position: absolute;
+        left: 4px;
+        color: var(--yellow);
+        font-weight: 700;
+      }
+
+      /* мокап концепта A — сайдбар */
+      .a-body {
+        display: flex;
+        min-height: 280px;
+      }
+      .a-side {
+        width: 168px;
+        background: #0c1117;
+        border-right: 1px solid var(--border-soft);
+        padding: 8px;
+        flex-shrink: 0;
+      }
+      .a-search {
+        background: #11161f;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 4px 8px;
+        color: var(--text-faint);
+        margin-bottom: 8px;
+        display: flex;
+        gap: 6px;
+      }
+      .a-proj {
+        margin-bottom: 6px;
+      }
+      .a-proj > .p-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 6px;
+        color: var(--text);
+        font-weight: 600;
+      }
+      .p-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .a-sess {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 6px 3px 20px;
+        border-radius: 6px;
+        color: var(--text-dim);
+      }
+      .a-sess.on {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .a-sess .st {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .st.busy {
+        background: var(--yellow);
+        box-shadow: 0 0 6px var(--yellow);
+        animation: pulse 1.2s infinite;
+      }
+      .st.wait {
+        background: var(--blue);
+      }
+      .st.idle {
+        background: var(--text-faint);
+      }
+      .st.done {
+        background: var(--green);
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .a-center {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .a-termbig {
+        flex: 1;
+        margin: 10px;
+        background: #0b0f15;
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--green);
+        line-height: 1.6;
+      }
+      .a-right {
+        width: 150px;
+        border-left: 1px solid var(--border-soft);
+        padding: 10px;
+        background: #0c1117;
+        flex-shrink: 0;
+      }
+      .a-right h5 {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 7px;
+        letter-spacing: 0.7px;
+      }
+      .a-info {
+        font-size: 10px;
+        color: var(--text-dim);
+        margin-bottom: 10px;
+        line-height: 1.5;
+      }
+
+      /* мокап концепта B — канбан */
+      .b-board {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 9px;
+        padding: 12px;
+        min-height: 280px;
+      }
+      .b-col {
+        background: #0c1117;
+        border: 1px solid var(--border-soft);
+        border-radius: 9px;
+        padding: 8px;
+      }
+      .b-col h5 {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .b-card {
+        background: #131922;
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        padding: 7px 9px;
+        margin-bottom: 7px;
+        cursor: grab;
+      }
+      .b-card .t {
+        color: var(--text);
+        font-weight: 600;
+        font-size: 10.5px;
+      }
+      .b-card .d {
+        color: var(--text-faint);
+        font-size: 9.5px;
+        margin-top: 2px;
+      }
+      .b-card .term {
+        margin-top: 5px;
+        background: #0b0f15;
+        border-radius: 5px;
+        padding: 4px 6px;
+        font-family: var(--mono);
+        font-size: 8.5px;
+        color: var(--green);
+        line-height: 1.5;
+      }
+      .b-card .proj {
+        display: inline-block;
+        margin-top: 5px;
+        font-size: 8.5px;
+        padding: 1px 7px;
+        border-radius: 999px;
+      }
+
+      /* мокап концепта C — спотлайт */
+      .c-stage {
+        min-height: 280px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 36px 20px;
+        background: radial-gradient(ellipse at 50% 0%, #141b27 0%, #0a0e14 70%);
+      }
+      .c-search {
+        width: 78%;
+        background: #161d29;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 16px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        color: var(--text);
+        font-size: 13px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+      .c-search .caret {
+        width: 2px;
+        height: 14px;
+        background: var(--accent);
+        animation: pulse 1s infinite;
+      }
+      .c-results {
+        width: 78%;
+        margin-top: 10px;
+        background: #11161f;
+        border: 1px solid var(--border-soft);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .c-res {
+        padding: 8px 14px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        border-bottom: 1px solid var(--border-soft);
+      }
+      .c-res:last-child {
+        border-bottom: none;
+      }
+      .c-res.on {
+        background: var(--accent-soft);
+      }
+      .c-res .t {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .c-res .t mark {
+        background: rgba(217, 122, 74, 0.35);
+        color: #ffd9c2;
+        border-radius: 3px;
+        padding: 0 2px;
+      }
+      .c-res .d {
+        color: var(--text-faint);
+        font-size: 10px;
+      }
+      .c-res .kbd-hint {
+        margin-left: auto;
+      }
+      .c-recent {
+        width: 78%;
+        margin-top: 14px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      kbd {
+        font-family: var(--mono);
+        font-size: 10px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 1px 6px;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+
+      /* ============ КАРТОЧКИ ФИШЕК ============ */
+      .filter-bar {
+        display: flex;
+        gap: 8px;
+        margin: 18px 0 22px;
+        flex-wrap: wrap;
+      }
+      .fbtn {
+        padding: 7px 16px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        color: var(--text-dim);
+        transition: all 0.15s;
+        font-family: inherit;
+      }
+      .fbtn:hover {
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .fbtn.on {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: rgba(217, 122, 74, 0.4);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+        transition:
+          transform 0.15s,
+          border-color 0.15s;
+      }
+      .card:hover {
+        transform: translateY(-2px);
+        border-color: var(--border);
+      }
+      .card.hidden {
+        display: none;
+      }
+      .card .head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .card .ico {
+        font-size: 20px;
+        line-height: 1.2;
+      }
+      .card h4 {
+        font-size: 15px;
+        font-weight: 650;
+        flex: 1;
+      }
+      .card p {
+        font-size: 13px;
+        color: var(--text-dim);
+      }
+      .badge {
+        font-size: 10.5px;
+        padding: 2px 10px;
+        border-radius: 999px;
+        white-space: nowrap;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        flex-shrink: 0;
+      }
+      .badge.p1 {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+      .badge.p2 {
+        background: var(--yellow-soft);
+        color: var(--yellow);
+      }
+      .badge.p3 {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      /* ============ БЭКЛОГ ============ */
+      .backlog-summary {
+        display: flex;
+        gap: 12px;
+        margin: 16px 0 20px;
+        font-size: 13px;
+        color: var(--text-dim);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .backlog-summary .pill {
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        border-radius: 999px;
+        padding: 5px 14px;
+      }
+      .backlog-summary .pill b {
+        color: var(--accent);
+      }
+      table.backlog {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--bg2);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      table.backlog {
+        display: block;
+        overflow-x: auto;
+      }
+      table.backlog thead th {
+        text-align: left;
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        color: var(--text-faint);
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg3);
+        white-space: nowrap;
+      }
+      table.backlog td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-soft);
+        font-size: 13.5px;
+        vertical-align: top;
+      }
+      table.backlog tr:last-child td {
+        border-bottom: none;
+      }
+      table.backlog tr {
+        transition: background 0.15s;
+        cursor: pointer;
+      }
+      table.backlog tbody tr:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+      table.backlog tr.checked {
+        background: var(--green-soft);
+      }
+      table.backlog tr.checked .task-name {
+        text-decoration: line-through;
+        color: var(--text-faint);
+      }
+      .chk {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        border: 1.5px solid var(--border);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: transparent;
+        transition: all 0.15s;
+        background: var(--bg);
+      }
+      tr.checked .chk {
+        background: var(--green);
+        border-color: var(--green);
+        color: #08110b;
+      }
+      .task-name {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .task-desc {
+        font-size: 12px;
+        color: var(--text-faint);
+        margin-top: 2px;
+      }
+      .tag {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .tag.cat-test {
+        background: var(--purple-soft);
+        color: var(--purple);
+      }
+      .tag.cat-tech {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+      .tag.cat-feat {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+      .tag.cat-proc {
+        background: var(--yellow-soft);
+        color: var(--yellow);
+      }
+      .meter {
+        display: inline-flex;
+        gap: 3px;
+      }
+      .meter i {
+        width: 9px;
+        height: 9px;
+        border-radius: 2.5px;
+        background: var(--bg3);
+        border: 1px solid var(--border-soft);
+      }
+      .meter.effect i.f {
+        background: var(--green);
+        border-color: var(--green);
+      }
+      .meter.effort i.f {
+        background: var(--yellow);
+        border-color: var(--yellow);
+      }
+      .status-chip {
+        font-size: 10.5px;
+        padding: 2px 9px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .status-chip.wip {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      /* ============ МЕЛОЧИ ============ */
+      .legend {
+        display: flex;
+        gap: 18px;
+        font-size: 12px;
+        color: var(--text-faint);
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        display: inline-block;
+      }
+
+      @media (max-width: 900px) {
+        nav.side {
+          display: none;
+        }
+        main {
+          padding: 24px 18px 80px;
+        }
+        .pros-cons {
+          grid-template-columns: 1fr;
+        }
+        .b-board {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <!-- ===== БОКОВАЯ НАВИГАЦИЯ ===== -->
+      <nav class="side" id="sidenav">
+        <div class="logo">Claude<span>Desk</span></div>
+        <div class="date">Предложения по редизайну · 12 июня 2026</div>
+        <a href="#now" class="active">1 · Как выглядит сейчас</a>
+        <a href="#concepts">2 · Новый вид (концепты)</a>
+        <a href="#features">3 · Фишки-предложения</a>
+        <a href="#backlog">4 · Бэклог — выбери задачи</a>
+        <div class="foot">
+          Один файл, работает офлайн.<br />Все мокапы — CSS-схемы, не скриншоты.
+        </div>
+      </nav>
+
+      <main>
+        <!-- ===== ШАПКА ===== -->
+        <header class="hero">
+          <h1>ClaudeDesk: что улучшить и как может выглядеть</h1>
+          <p>
+            ClaudeDesk — настольное приложение для работы с несколькими чатами Claude одновременно.
+            Ниже — схема текущего интерфейса, три варианта нового вида, идеи-фишки и таблица задач,
+            где можно отметить, что берём в работу.
+          </p>
+          <div class="pains">
+            <span class="pain">Трудно быстро найти нужный диалог</span>
+            <span class="pain">Хочется сразу видеть название И описание сессии</span>
+            <span class="pain">Плитки и чипы не там, где ждёшь</span>
+            <span class="pain">Непонятна структура проектов</span>
+          </div>
+        </header>
+
+        <!-- ===================================================== -->
+        <!-- 1. КАК ВЫГЛЯДИТ СЕЙЧАС -->
+        <!-- ===================================================== -->
+        <section id="now">
+          <h2><span class="num">1</span>Как выглядит сейчас</h2>
+          <p class="lead">
+            Сегодня всё управление собрано в <b>верхней полосе</b>: пять вкладок-разделов, под ними
+            полоса «чипов» (маленьких ярлыков открытых чатов), кнопка Ask (поиск по всем чатам) и
+            шестерёнка настроек. Ниже — две главные рабочие зоны.
+          </p>
+
+          <h3>Раздел History — список всех сессий</h3>
+          <div class="mock">
+            <div class="mock-title">
+              <span class="dots"><i></i><i></i><i></i></span> ClaudeDesk — History
+            </div>
+            <div class="m-tabs">
+              <span class="m-tab on">History</span><span class="m-tab">Chats</span
+              ><span class="m-tab">Projects</span> <span class="m-tab">Branches</span
+              ><span class="m-tab">Agents</span><span class="m-gear">⚙</span>
+            </div>
+            <div class="m-chips">
+              <span class="m-chip on">EasyTable: канвас</span
+              ><span class="m-chip">Vault: разбор</span> <span class="m-chip">YT: монтаж</span
+              ><span class="m-chip">фикс тестов</span>
+              <span class="m-ask">🔍 Ask</span>
+            </div>
+            <div class="m-body">
+              <div class="m-left">
+                <div class="folder on">📁 EasyTable</div>
+                <div class="folder">📁 YouTubeStudio</div>
+                <div class="folder">📌 Важное</div>
+                <div class="folder" style="color: #4a5466">＋ папка · Hide empty</div>
+              </div>
+              <div class="m-main">
+                <div class="m-row">
+                  <div class="t">Canvas 2D рендерер</div>
+                  <div class="d">Переезд с Phaser на чистый Canvas, спрайты агентов…</div>
+                </div>
+                <div class="m-row indent">
+                  <div class="t">└ ветка: зум к курсору</div>
+                  <div class="d">Эксперимент с камерой</div>
+                </div>
+                <div class="m-row">
+                  <div class="t">Авторизация JWT</div>
+                  <div class="d">Регистрация, логин, refresh-токены…</div>
+                </div>
+                <div class="m-row">
+                  <div class="t">Схема базы данных</div>
+                  <div class="d">Drizzle, таблица users…</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="cap">
+            <b>Что здесь:</b> слева — папки (создание, закрепление, скрытие пустых), в центре —
+            двухстрочные сессии (название + AI-описание), ветки сессий показаны отступами. Правый
+            клик по сессии — меню: переименовать, скрыть, ответвить.
+          </p>
+
+          <h3>Раздел Chats — сетка терминалов</h3>
+          <div class="mock">
+            <div class="mock-title">
+              <span class="dots"><i></i><i></i><i></i></span> ClaudeDesk — Chats
+            </div>
+            <div class="m-tabs">
+              <span class="m-tab">History</span><span class="m-tab on">Chats</span
+              ><span class="m-tab">Projects</span> <span class="m-tab">Branches</span
+              ><span class="m-tab">Agents</span><span class="m-gear">⚙</span>
+            </div>
+            <div class="m-chips">
+              <span class="m-chip on">EasyTable: канвас</span
+              ><span class="m-chip">Vault: разбор</span> <span class="m-chip">YT: монтаж</span
+              ><span class="m-ask">🔍 Ask</span>
+            </div>
+            <div class="m-grid">
+              <div class="m-term">
+                <div class="hdr"><span>EasyTable: канвас</span><span>⠿</span></div>
+                &gt; рисую тайлмап слоями…<br /><span class="dimline">✻ думаю…</span>
+              </div>
+              <div class="m-term">
+                <div class="hdr"><span>Vault: разбор</span><span>⠿</span></div>
+                &gt; готово, 12 заметок<br /><span class="dimline">ждёт ввода ▌</span>
+              </div>
+              <div class="m-term">
+                <div class="hdr"><span>YT: монтаж</span><span>⠿</span></div>
+                &gt; собираю FCPXML…<br /><span class="dimline">✻ думаю…</span>
+              </div>
+              <div class="m-term">
+                <div class="hdr"><span>фикс тестов</span><span>⠿</span></div>
+                &gt; 3 теста упали<br /><span class="dimline">ждёт ввода ▌</span>
+              </div>
+              <div class="m-term">
+                <div class="hdr"><span>арена: A/B</span><span>⠿</span></div>
+                &gt; сравнение ответов…
+              </div>
+              <div
+                class="m-term"
+                style="
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  color: #3a4456;
+                  font-size: 16px;
+                "
+              >
+                ＋
+              </div>
+            </div>
+          </div>
+          <p class="cap">
+            <b>Что здесь:</b> до 12 плиток-терминалов на окно, перетаскивание мышью, изменение
+            размера, правый клик по плитке — ответвить чат, открыть папку, переименовать. Ещё есть:
+            Projects (рельса проектов слева + чаты проекта), Branches (задачи в отдельных копиях
+            репозитория — git-worktree), Agents (какой именно файл claude запускать и настройки
+            терминала), AI-названия сессий, доступ из браузера с другого устройства, арена сравнения
+            моделей и диктовка голосом.
+          </p>
+
+          <p class="note">
+            Главная проблема текущей схемы: <b>всё «вход» через верхнюю полосу</b> — она и
+            навигация, и список открытых чатов, и поиск. Когда чатов много, чипы сортируются по
+            недавности и «уезжают», а связь «проект → его сессии» нигде не видна целиком.
+          </p>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- 2. КОНЦЕПТЫ -->
+        <!-- ===================================================== -->
+        <section id="concepts">
+          <h2><span class="num">2</span>Новый вид — три концепта</h2>
+          <p class="lead">
+            Три разных идеи компоновки. Их можно смешивать: например, взять сайдбар из A и
+            спотлайт-поиск из C. Переключайте вкладки ниже.
+          </p>
+
+          <div class="concept-tabs">
+            <div class="concept-tab on" data-c="a">
+              Концепт A — «Командный центр»<small>сайдбар-дерево вместо верхней полосы</small>
+            </div>
+            <div class="concept-tab" data-c="b">
+              Концепт B — «Канбан-доска»<small>чаты как карточки по статусам</small>
+            </div>
+            <div class="concept-tab" data-c="c">
+              Концепт C — «Спотлайт»<small>поиск — главный вход в всё</small>
+            </div>
+          </div>
+
+          <!-- КОНЦЕПТ A -->
+          <div class="concept show" id="concept-a">
+            <div class="mock">
+              <div class="mock-title">
+                <span class="dots"><i></i><i></i><i></i></span> Концепт A — Командный центр
+              </div>
+              <div class="a-body">
+                <div class="a-side">
+                  <div class="a-search">
+                    🔍 <span>поиск… <kbd>Ctrl K</kbd></span>
+                  </div>
+                  <div class="a-proj">
+                    <div class="p-name">
+                      <span class="p-dot" style="background: var(--accent)"></span> EasyTable
+                      <span style="margin-left: auto; color: #4a5466">3</span>
+                    </div>
+                    <div class="a-sess on"><span class="st busy"></span> Canvas 2D рендерер</div>
+                    <div class="a-sess"><span class="st wait"></span> Авторизация JWT</div>
+                    <div class="a-sess"><span class="st idle"></span> Схема БД</div>
+                  </div>
+                  <div class="a-proj">
+                    <div class="p-name">
+                      <span class="p-dot" style="background: var(--blue)"></span> YouTubeStudio
+                      <span style="margin-left: auto; color: #4a5466">2</span>
+                    </div>
+                    <div class="a-sess"><span class="st busy"></span> Монтаж выпуска</div>
+                    <div class="a-sess"><span class="st done"></span> Обложки</div>
+                  </div>
+                  <div class="a-proj">
+                    <div class="p-name">
+                      <span class="p-dot" style="background: var(--purple)"></span> Vault
+                    </div>
+                    <div class="a-sess"><span class="st wait"></span> Разбор заметок</div>
+                  </div>
+                </div>
+                <div class="a-center">
+                  <div class="m-chips" style="border-bottom: 1px solid var(--border-soft)">
+                    <span class="m-chip on">Canvas 2D рендерер</span
+                    ><span class="m-chip">Авторизация JWT</span
+                    ><span class="m-chip">Монтаж выпуска</span>
+                  </div>
+                  <div class="a-termbig">
+                    $ claude --resume<br />
+                    &gt; Рисую тайлмап слоями: пол, мебель, агенты…<br />
+                    &gt; AgentActor.update(dt) — анимация ходьбы готова<br />
+                    <span style="color: var(--yellow)">✻ думаю… (12 сек)</span>
+                  </div>
+                </div>
+                <div class="a-right">
+                  <h5>О сессии</h5>
+                  <div class="a-info">
+                    «Переезд рендера с Phaser на чистый Canvas 2D, спрайты и камера»
+                  </div>
+                  <h5>Статус</h5>
+                  <div class="a-info">
+                    <span class="st busy" style="display: inline-block"></span> Claude думает
+                  </div>
+                  <h5>Ветки</h5>
+                  <div class="a-info">└ зум к курсору<br />└ оптимизация RAF</div>
+                </div>
+              </div>
+            </div>
+            <p class="cap">
+              <b>Суть:</b> верхняя полоса исчезает. Слева — постоянное дерево «проект → его сессии»
+              с цветными метками и живыми индикаторами статуса (жёлтый мигает = думает, синий = ждёт
+              вашего ответа, зелёный = закончил). Центр — один большой терминал текущего чата
+              (вкладки сверху — открытые). Справа — панель сведений: AI-описание, статус, ветки.
+              Сетку плиток это не отменяет — она остаётся как режим «обзор» по кнопке.
+            </p>
+            <div class="pros-cons">
+              <div class="pc plus">
+                <h4>Что даёт</h4>
+                <ul>
+                  <li>Структура проектов видна всегда — главная боль закрыта</li>
+                  <li>Название + описание + статус каждой сессии в одном месте</li>
+                  <li>Ничего не «уезжает»: дерево стабильно, в отличие от чипов</li>
+                  <li>History, Projects и чипы сливаются в одну панель — меньше разделов</li>
+                </ul>
+              </div>
+              <div class="pc minus">
+                <h4>Чего стоит</h4>
+                <ul>
+                  <li>Самая большая переделка: трогает раскладку всего окна</li>
+                  <li>Сайдбар отъедает ~240px ширины (можно сворачивать в иконки)</li>
+                  <li>
+                    Нужно решить судьбу разделов Branches и Agents (вероятно — в нижнюю часть
+                    сайдбара)
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- КОНЦЕПТ B -->
+          <div class="concept" id="concept-b">
+            <div class="mock">
+              <div class="mock-title">
+                <span class="dots"><i></i><i></i><i></i></span> Концепт B — Канбан-доска чатов
+              </div>
+              <div class="b-board">
+                <div class="b-col">
+                  <h5 style="color: var(--yellow)"><span class="st busy"></span> ДУМАЕТ · 2</h5>
+                  <div class="b-card">
+                    <div class="t">Canvas 2D рендерер</div>
+                    <div class="d">рисует тайлмап…</div>
+                    <div class="term">✻ думаю… 12с</div>
+                    <span class="proj" style="background: var(--accent-soft); color: var(--accent)"
+                      >EasyTable</span
+                    >
+                  </div>
+                  <div class="b-card">
+                    <div class="t">Монтаж выпуска</div>
+                    <div class="d">собирает FCPXML</div>
+                    <div class="term">✻ думаю… 4с</div>
+                    <span class="proj" style="background: var(--blue-soft); color: var(--blue)"
+                      >YouTube</span
+                    >
+                  </div>
+                </div>
+                <div class="b-col">
+                  <h5 style="color: var(--blue)"><span class="st wait"></span> ЖДЁТ ВАС · 2</h5>
+                  <div class="b-card">
+                    <div class="t">Авторизация JWT</div>
+                    <div class="d">спрашивает про cookie</div>
+                    <div class="term">какой SameSite? ▌</div>
+                    <span class="proj" style="background: var(--accent-soft); color: var(--accent)"
+                      >EasyTable</span
+                    >
+                  </div>
+                  <div class="b-card">
+                    <div class="t">Разбор заметок</div>
+                    <div class="d">нужен выбор папки</div>
+                    <div class="term">куда класть? ▌</div>
+                    <span class="proj" style="background: var(--purple-soft); color: var(--purple)"
+                      >Vault</span
+                    >
+                  </div>
+                </div>
+                <div class="b-col">
+                  <h5 style="color: var(--green)"><span class="st done"></span> ГОТОВО · 1</h5>
+                  <div class="b-card">
+                    <div class="t">Обложки</div>
+                    <div class="d">3 варианта сохранены</div>
+                    <div class="term">✓ завершено</div>
+                    <span class="proj" style="background: var(--blue-soft); color: var(--blue)"
+                      >YouTube</span
+                    >
+                  </div>
+                </div>
+                <div class="b-col">
+                  <h5 style="color: var(--text-faint)">⏸ ОТЛОЖЕНО · 1</h5>
+                  <div class="b-card" style="opacity: 0.6">
+                    <div class="t">Схема БД</div>
+                    <div class="d">вернуться после авторизации</div>
+                    <span class="proj" style="background: var(--accent-soft); color: var(--accent)"
+                      >EasyTable</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="cap">
+              <b>Суть:</b> вместо сетки одинаковых плиток — доска как в Trello: колонки по
+              <b>состоянию</b> чата. Карточки сами переезжают между колонками: запустили — «Думает»,
+              Claude задал вопрос — «Ждёт вас», закончил — «Готово». Клик по карточке раскрывает
+              терминал на весь экран. Колонка «Ждёт вас» — фактически список дел.
+            </p>
+            <div class="pros-cons">
+              <div class="pc plus">
+                <h4>Что даёт</h4>
+                <ul>
+                  <li>
+                    Мгновенно видно, где нужно ваше участие — главная ценность при 5+ параллельных
+                    чатах
+                  </li>
+                  <li>Карточка = название + описание + последняя строка терминала</li>
+                  <li>Привычная механика (Trello/Kanban), перетаскивание уже есть в коде</li>
+                </ul>
+              </div>
+              <div class="pc minus">
+                <h4>Чего стоит</h4>
+                <ul>
+                  <li>
+                    Нужен надёжный детектор состояния «думает / ждёт ввода» из потока терминала —
+                    это отдельная задача
+                  </li>
+                  <li>
+                    Терять сетку живых терминалов жалко — лучше как второй режим Chats, а не замена
+                  </li>
+                  <li>При 2-3 чатах доска выглядит пустовато</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- КОНЦЕПТ C -->
+          <div class="concept" id="concept-c">
+            <div class="mock">
+              <div class="mock-title">
+                <span class="dots"><i></i><i></i><i></i></span> Концепт C — Спотлайт
+              </div>
+              <div class="c-stage">
+                <div class="c-search">
+                  🔍 <span>канвас</span><span class="caret"></span
+                  ><span style="margin-left: auto; color: var(--text-faint); font-size: 10px"
+                    >Ctrl+K из любого места</span
+                  >
+                </div>
+                <div class="c-results">
+                  <div class="c-res on">
+                    <span class="st busy"></span>
+                    <div>
+                      <div class="t"><mark>Канвас</mark> 2D рендерер</div>
+                      <div class="d">EasyTable · «переезд с Phaser…» · открыт, думает</div>
+                    </div>
+                    <span class="kbd-hint"><kbd>Enter</kbd></span>
+                  </div>
+                  <div class="c-res">
+                    <span class="st idle"></span>
+                    <div>
+                      <div class="t">Зум <mark>канвас</mark>а к курсору</div>
+                      <div class="d">EasyTable · ветка · закрыта 2 дня назад</div>
+                    </div>
+                  </div>
+                  <div class="c-res">
+                    <span class="st idle"></span>
+                    <div>
+                      <div class="t">
+                        Совпадение в тексте: «…рисуем на <mark>канвас</mark>е тайлы…»
+                      </div>
+                      <div class="d">внутри сессии «Office MVP» · 14 мая</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="c-recent">
+                  <span class="m-chip on">⌃1 Canvas 2D</span
+                  ><span class="m-chip">⌃2 Авторизация</span> <span class="m-chip">⌃3 Монтаж</span
+                  ><span class="m-chip">⌃4 Vault</span>
+                </div>
+              </div>
+            </div>
+            <p class="cap">
+              <b>Суть:</b> минимальное изменение интерфейса, максимальное — привычек. Главный вход —
+              окно поиска по <kbd>Ctrl+K</kbd> из любого места (как Spotlight на Mac): ищет по
+              названиям, AI-описаниям <b>и содержимому</b> всех сессий с подсветкой найденного.
+              Стрелки + Enter — и вы в нужном чате. Остальной интерфейс почти не меняется, снизу —
+              горячие чипы <kbd>Ctrl 1..9</kbd>.
+            </p>
+            <div class="pros-cons">
+              <div class="pc plus">
+                <h4>Что даёт</h4>
+                <ul>
+                  <li>Боль «трудно найти диалог» закрывается одним инструментом</li>
+                  <li>Дёшево: кнопка Ask уже есть — её усиливаем и вешаем на горячую клавишу</li>
+                  <li>Ничего не ломает, можно сделать первым шагом перед A или B</li>
+                </ul>
+              </div>
+              <div class="pc minus">
+                <h4>Чего стоит</h4>
+                <ul>
+                  <li>Не решает «не вижу структуру проектов» — это про навигацию, не поиск</li>
+                  <li>
+                    Нужен индекс содержимого сессий (быстрый поиск по всем текстам), иначе будет
+                    медленно
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <p class="note" style="margin-top: 24px">
+            <b>Рекомендация:</b> начать с C (спотлайт — быстро и дёшево), затем A (сайдбар-дерево —
+            закрывает структуру проектов), а доску B добавить позже как второй режим вкладки Chats,
+            когда появится детектор статусов.
+          </p>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- 3. ФИШКИ -->
+        <!-- ===================================================== -->
+        <section id="features">
+          <h2><span class="num">3</span>Фишки-предложения</h2>
+          <p class="lead">
+            Идеи поменьше — каждую можно делать отдельно. Приоритет:
+            <b style="color: var(--red)">сейчас</b> — бьёт прямо по названным болям,
+            <b style="color: var(--yellow)">скоро</b> — заметно улучшает повседневную работу,
+            <b style="color: var(--blue)">потом</b> — приятно, но подождёт.
+          </p>
+
+          <div class="filter-bar" id="featFilter">
+            <button class="fbtn on" data-f="all">Все · <span id="cntAll">11</span></button>
+            <button class="fbtn" data-f="p1">🔥 Сейчас</button>
+            <button class="fbtn" data-f="p2">⏳ Скоро</button>
+            <button class="fbtn" data-f="p3">💤 Потом</button>
+          </div>
+
+          <div class="cards" id="featCards">
+            <div class="card" data-p="p1">
+              <div class="head">
+                <span class="ico">🔎</span>
+                <h4>Глобальный поиск по содержимому</h4>
+                <span class="badge p1">сейчас</span>
+              </div>
+              <p>
+                Поиск не только по названиям, но и по тексту всех сессий, с подсветкой найденных
+                слов и переходом к месту в диалоге. Основа концепта C.
+              </p>
+            </div>
+            <div class="card" data-p="p1">
+              <div class="head">
+                <span class="ico">🚦</span>
+                <h4>Статус-индикатор на чипах и плитках</h4>
+                <span class="badge p1">сейчас</span>
+              </div>
+              <p>
+                Цветная точка: жёлтая мигает — Claude думает, синяя — ждёт вашего ответа, зелёная —
+                закончил. Видно, куда смотреть, не открывая чат.
+              </p>
+            </div>
+            <div class="card" data-p="p1">
+              <div class="head">
+                <span class="ico">🔔</span>
+                <h4>Уведомление «фоновый чат ответил»</h4>
+                <span class="badge p1">сейчас</span>
+              </div>
+              <p>
+                Системное уведомление (или звук + мигающий чип), когда чат в фоне закончил отвечать.
+                Не нужно прокликивать плитки «а вдруг готово».
+              </p>
+            </div>
+            <div class="card" data-p="p1">
+              <div class="head">
+                <span class="ico">👁</span>
+                <h4>Превью сессии при наведении</h4>
+                <span class="badge p1">сейчас</span>
+              </div>
+              <p>
+                Навели мышь на чип или строку в History — всплывает окошко с последними строками
+                диалога. Понятно, тот ли это чат, без открытия.
+              </p>
+            </div>
+            <div class="card" data-p="p1">
+              <div class="head">
+                <span class="ico">⌨️</span>
+                <h4>Быстрый переключатель Ctrl+1..9</h4>
+                <span class="badge p1">сейчас</span>
+              </div>
+              <p>
+                Цифра = позиция чипа. Мгновенный прыжок между открытыми чатами без мыши, как вкладки
+                в браузере.
+              </p>
+            </div>
+            <div class="card" data-p="p2">
+              <div class="head">
+                <span class="ico">🎨</span>
+                <h4>Цветные метки и иконки папок</h4>
+                <span class="badge p2">скоро</span>
+              </div>
+              <p>
+                Каждой папке/проекту — свой цвет и значок. Цвет наследуется чипами и плитками: с
+                одного взгляда ясно, к какому проекту относится чат.
+              </p>
+            </div>
+            <div class="card" data-p="p2">
+              <div class="head">
+                <span class="ico">📅</span>
+                <h4>Группировка History по дням</h4>
+                <span class="badge p2">скоро</span>
+              </div>
+              <p>
+                Заголовки «Сегодня», «Вчера», «На этой неделе» в списке сессий. Искать «тот разговор
+                со вторника» становится в разы проще.
+              </p>
+            </div>
+            <div class="card" data-p="p2">
+              <div class="head">
+                <span class="ico">📌</span>
+                <h4>Закрепление важных сессий</h4>
+                <span class="badge p2">скоро</span>
+              </div>
+              <p>
+                Pin — и сессия всегда сверху списка независимо от даты, а её чип не «уезжает» при
+                сортировке по недавности.
+              </p>
+            </div>
+            <div class="card" data-p="p2">
+              <div class="head">
+                <span class="ico">📝</span>
+                <h4>Шаблоны промптов</h4>
+                <span class="badge p2">скоро</span>
+              </div>
+              <p>
+                Библиотека заготовок (промпт — текст-инструкция для Claude): «сделай ревью», «напиши
+                тесты», «объясни код». Вставка в один клик или по короткой команде.
+              </p>
+            </div>
+            <div class="card" data-p="p3">
+              <div class="head">
+                <span class="ico">📄</span>
+                <h4>Экспорт сессии в Markdown</h4>
+                <span class="badge p3">потом</span>
+              </div>
+              <p>
+                Кнопка «сохранить диалог» в файл .md (простой текстовый формат с разметкой) — для
+                заметок, вики или передачи коллеге.
+              </p>
+            </div>
+            <div class="card" data-p="p3">
+              <div class="head">
+                <span class="ico">🗺</span>
+                <h4>Мини-карта открытых плиток</h4>
+                <span class="badge p3">потом</span>
+              </div>
+              <p>
+                Маленькая схема сетки терминалов в углу (как мини-карта в редакторах кода): видно
+                расположение всех плиток и их статусы, клик — переход.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- 4. БЭКЛОГ -->
+        <!-- ===================================================== -->
+        <section id="backlog">
+          <h2><span class="num">4</span>Бэклог — выбери, что делать</h2>
+          <p class="lead">
+            Всё известное на сегодня: планы, находки аудита кода и новые задачи. Кликайте по
+            строкам, чтобы отметить выбранное — счётчик ниже посчитает. <b>Эффект</b> — насколько
+            станет лучше; <b>усилие</b> — сколько работы.
+          </p>
+
+          <div class="backlog-summary">
+            <span class="pill">Выбрано: <b id="selCount">0</b> из 11</span>
+            <span class="pill" id="selHint">кликните по строкам таблицы</span>
+          </div>
+
+          <table class="backlog">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Задача</th>
+                <th>Тип</th>
+                <th>Эффект</th>
+                <th>Усилие</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="backlogBody">
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">План 004 — юнит-тесты в CI</div>
+                  <div class="task-desc">
+                    Автоматический прогон мелких тестов при каждом изменении кода (CI — сервер,
+                    который сам проверяет сборку). Сейчас ошибки всплывают только вручную.
+                  </div>
+                </td>
+                <td><span class="tag cat-test">тесты</span></td>
+                <td>
+                  <span class="meter effect"
+                    ><i class="f"></i><i class="f"></i><i class="f"></i
+                  ></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">План 005 — убрать 151 waitForTimeout из e2e</div>
+                  <div class="task-desc">
+                    Сквозные тесты (e2e) ждут фиксированные паузы вместо реальных событий — отсюда
+                    «флаки» (тесты, падающие случайно). Заменить на ожидание условий.
+                  </div>
+                </td>
+                <td><span class="tag cat-test">тесты</span></td>
+                <td>
+                  <span class="meter effect"
+                    ><i class="f"></i><i class="f"></i><i class="f"></i
+                  ></span>
+                </td>
+                <td>
+                  <span class="meter effort"
+                    ><i class="f"></i><i class="f"></i><i class="f"></i
+                  ></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">Live-watch: опрос диска каждые 2 секунды</div>
+                  <div class="task-desc">
+                    Аудит: список сессий перечитывается с диска каждые 2 с даже в простое — фоновый
+                    шум чтения файлов. Перейти на наблюдение за изменениями файлов (события вместо
+                    опроса).
+                  </div>
+                </td>
+                <td><span class="tag cat-tech">техдолг</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">TerminalView без тестов (~1050 строк)</div>
+                  <div class="task-desc">
+                    Самый большой компонент интерфейса — окно терминала — вообще не покрыт тестами.
+                    Любая правка — игра в рулетку.
+                  </div>
+                </td>
+                <td><span class="tag cat-test">тесты</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">chats.ts — 908 строк, распилить на модули</div>
+                  <div class="task-desc">
+                    Один файл отвечает сразу за всё управление чатами. Разделить на части по смыслу
+                    — проще читать, тестировать и править без поломок соседнего.
+                  </div>
+                </td>
+                <td><span class="tag cat-tech">техдолг</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">xterm на beta-версиях</div>
+                  <div class="task-desc">
+                    Библиотека терминала стоит на нестабильных beta-выпусках. Перейти на стабильные
+                    версии или осознанно зафиксировать текущие.
+                  </div>
+                </td>
+                <td><span class="tag cat-tech">техдолг</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">README противоречит release-workflow</div>
+                  <div class="task-desc">
+                    Инструкция в README описывает один порядок выпуска версий, реальный сценарий —
+                    другой. Привести к одному варианту, чтобы не путаться.
+                  </div>
+                </td>
+                <td><span class="tag cat-proc">процесс</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">npm run release пушит без тестов</div>
+                  <div class="task-desc">
+                    Команда выпуска отправляет код в репозиторий, не прогоняя тесты. Добавить
+                    обязательную проверку перед отправкой.
+                  </div>
+                </td>
+                <td><span class="tag cat-proc">процесс</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">Кнопка «Скачать» для бинарников claude</div>
+                  <div class="task-desc">
+                    Если нужной версии программы claude (под Opus 4.6 / 4.7 / 4.8) нет на диске —
+                    показать кнопку, которая сама скачает и подключит её, вместо ручной установки.
+                  </div>
+                </td>
+                <td><span class="tag cat-feat">фича</span></td>
+                <td>
+                  <span class="meter effect"
+                    ><i class="f"></i><i class="f"></i><i class="f"></i
+                  ></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">Влить ветку Марка fix/win-claude-autodetect</div>
+                  <div class="task-desc">
+                    Готовая ветка с автопоиском claude.exe на Windows — приложение само находит
+                    установленную программу. Проверить и влить в основную ветку.
+                  </div>
+                </td>
+                <td><span class="tag cat-feat">фича</span></td>
+                <td>
+                  <span class="meter effect"><i class="f"></i><i class="f"></i><i></i></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td></td>
+              </tr>
+
+              <tr>
+                <td><span class="chk">✓</span></td>
+                <td>
+                  <div class="task-name">AI-описания для всех сессий</div>
+                  <div class="task-desc">
+                    Сейчас AI генерирует только название; добавить вторую строку — краткое описание
+                    «о чём диалог» для каждой сессии. Прямо закрывает боль «видеть название И
+                    описание».
+                  </div>
+                </td>
+                <td><span class="tag cat-feat">фича</span></td>
+                <td>
+                  <span class="meter effect"
+                    ><i class="f"></i><i class="f"></i><i class="f"></i
+                  ></span>
+                </td>
+                <td>
+                  <span class="meter effort"><i class="f"></i><i></i><i></i></span>
+                </td>
+                <td><span class="status-chip wip">уже в работе</span></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="legend">
+            <span
+              ><span class="swatch" style="background: var(--green)"></span> эффект (польза)</span
+            >
+            <span
+              ><span class="swatch" style="background: var(--yellow)"></span> усилие
+              (трудозатраты)</span
+            >
+            <span><span class="swatch" style="background: var(--purple)"></span> тесты</span>
+            <span
+              ><span class="swatch" style="background: var(--blue)"></span> техдолг (накопившиеся
+              внутренние проблемы кода)</span
+            >
+            <span
+              ><span class="swatch" style="background: var(--green)"></span> фича (новая
+              возможность)</span
+            >
+            <span><span class="swatch" style="background: var(--yellow)"></span> процесс</span>
+          </div>
+          <p class="note">
+            Подсказка по порядку: сначала дешёвые и полезные (live-watch, release-с-тестами, ветка
+            Марка), параллельно — AI-описания (уже идут), затем планы 004/005 как фундамент, и
+            крупное — кнопка «Скачать» и распил chats.ts.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      (function () {
+        // ---- Переключение концептов ----
+        var tabs = document.querySelectorAll('.concept-tab');
+        tabs.forEach(function (t) {
+          t.addEventListener('click', function () {
+            tabs.forEach(function (x) {
+              x.classList.remove('on');
+            });
+            t.classList.add('on');
+            document.querySelectorAll('.concept').forEach(function (c) {
+              c.classList.remove('show');
+            });
+            var el = document.getElementById('concept-' + t.dataset.c);
+            if (el) el.classList.add('show');
+          });
+        });
+
+        // ---- Фильтр карточек ----
+        var fbtns = document.querySelectorAll('#featFilter .fbtn');
+        fbtns.forEach(function (b) {
+          b.addEventListener('click', function () {
+            fbtns.forEach(function (x) {
+              x.classList.remove('on');
+            });
+            b.classList.add('on');
+            var f = b.dataset.f;
+            document.querySelectorAll('#featCards .card').forEach(function (c) {
+              c.classList.toggle('hidden', f !== 'all' && c.dataset.p !== f);
+            });
+          });
+        });
+
+        // ---- Чекбоксы бэклога ----
+        var rows = document.querySelectorAll('#backlogBody tr');
+        var counter = document.getElementById('selCount');
+        var hint = document.getElementById('selHint');
+        rows.forEach(function (r) {
+          r.addEventListener('click', function () {
+            r.classList.toggle('checked');
+            var n = document.querySelectorAll('#backlogBody tr.checked').length;
+            counter.textContent = n;
+            hint.textContent =
+              n === 0
+                ? 'кликните по строкам таблицы'
+                : n <= 3
+                  ? 'хороший фокус — мало, но по делу'
+                  : n <= 6
+                    ? 'нормальный спринт'
+                    : 'много — возможно, стоит сузить';
+          });
+        });
+
+        // ---- Подсветка навигации при прокрутке ----
+        var links = document.querySelectorAll('#sidenav a');
+        var sections = ['now', 'concepts', 'features', 'backlog'].map(function (id) {
+          return document.getElementById(id);
+        });
+        function spy() {
+          var pos = window.scrollY + 140;
+          var current = sections[0];
+          sections.forEach(function (s) {
+            if (s && s.offsetTop <= pos) current = s;
+          });
+          links.forEach(function (l) {
+            l.classList.toggle('active', l.getAttribute('href') === '#' + current.id);
+          });
+        }
+        window.addEventListener('scroll', spy, { passive: true });
+        spy();
+      })();
+    </script>
+  </body>
+</html>

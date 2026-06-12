@@ -35,7 +35,31 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (app) await app.close();
+  if (!app) return;
+  // Clean up: delete every folder this spec created. userData is already
+  // isolated under CLAUDEDESK_E2E, but the user has seen e2e-* folders
+  // leak into the real app (pre-isolation runs) — belt and suspenders.
+  try {
+    await win.evaluate(async () => {
+      interface Bridge {
+        electron?: { ipcRenderer: { invoke: (ch: string, args?: unknown) => Promise<unknown> } };
+      }
+      const bridge = (window as unknown as Bridge).electron;
+      if (!bridge) return;
+      const folders = (await bridge.ipcRenderer.invoke('list_folders', {})) as Array<{
+        id: string;
+        name: string;
+      }>;
+      for (const f of folders) {
+        if (f.name.startsWith('e2e-')) {
+          await bridge.ipcRenderer.invoke('delete_folder', { id: f.id });
+        }
+      }
+    });
+  } catch {
+    /* cleanup is best-effort */
+  }
+  await app.close();
 });
 
 test('creating a folder via Enter keeps it visible even when "Hide empty" is on', async () => {

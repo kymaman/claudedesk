@@ -41,6 +41,11 @@ import { getClaudeProjectsDir } from '../paths.js';
 import { isNoiseUserText } from './session-title.js';
 
 const MAX_TRANSCRIPT_BYTES = 1_500_000;
+/** Read at most this many bytes from the END of a huge JSONL. Sized
+ *  several times MAX_TRANSCRIPT_BYTES: raw JSONL is much bulkier than
+ *  the rendered text (tool_use noise, escaping), so the window still
+ *  fills the rendered cap with room to spare. Exported for tests. */
+export const TAIL_READ_BYTES = 8_000_000;
 // Bound memory on huge (50MB+) sessions: keep only the most recent
 // turns / results in a rolling window. Tool results sit a few entries
 // after their tool_use, so a wide window keeps pairing intact.
@@ -324,8 +329,22 @@ export async function loadSessionTranscript(opts: {
         : null;
   if (!filePath || !fs.existsSync(filePath)) return '';
 
+  // Big-session fast path: the output is capped to the freshest
+  // MAX_TRANSCRIPT_BYTES anyway, so parsing a 40+ MB JSONL from byte 0
+  // is pure waste — it made resumed tiles take >5s to first paint
+  // ("history appears late"). Seek to the tail instead. The first line
+  // after the seek is usually cut mid-JSON; it fails JSON.parse below
+  // and is skipped — exactly the tolerance the parser already has.
+  let start = 0;
+  try {
+    const size = fs.statSync(filePath).size;
+    if (size > TAIL_READ_BYTES) start = size - TAIL_READ_BYTES;
+  } catch {
+    /* race: file vanished between exists and stat — stream will error */
+  }
+
   return new Promise<string>((resolve, reject) => {
-    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const stream = fs.createReadStream(filePath, { encoding: 'utf-8', start });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
     // Rolling windows keep memory bounded on multi-MB sessions.

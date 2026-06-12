@@ -338,3 +338,41 @@ describe('loadSessionTranscript — real sessions (smoke)', () => {
     30_000,
   );
 });
+
+describe('loadSessionTranscript — huge-file tail seek', () => {
+  it('reads only the tail of a >8MB JSONL (early turns beyond the window are cut)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'transcript-tail-'));
+    const file = path.join(dir, 'big.jsonl');
+    try {
+      const early = JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'EARLY-MARKER turn' },
+      });
+      // ~9MB of non-renderable padding entries between the two real turns.
+      const pad = JSON.stringify({ type: 'progress', pad: 'A'.repeat(1024) });
+      const late = JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'FINAL-TURN survives' },
+      });
+      fs.writeFileSync(
+        file,
+        early + '\n' + Array(9000).fill(pad).join('\n') + '\n' + late + '\n',
+        'utf-8',
+      );
+
+      const t0 = Date.now();
+      const out = plain(await loadSessionTranscript({ filePath: file }));
+      const tookMs = Date.now() - t0;
+
+      // The tail window starts mid-file: the early turn is physically
+      // outside the read range, the final turn renders fine.
+      expect(out).toContain('FINAL-TURN survives');
+      expect(out).not.toContain('EARLY-MARKER');
+      // Sanity (not a strict perf assertion): tail read of 8MB must not
+      // take longer than a generous CI-safe bound.
+      expect(tookMs).toBeLessThan(5_000);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

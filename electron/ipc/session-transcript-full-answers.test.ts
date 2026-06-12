@@ -27,7 +27,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { loadSessionTranscript } from './session-transcript.js';
+import { loadSessionTranscript, TAIL_READ_BYTES } from './session-transcript.js';
 
 const PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const HAS_REAL = fs.existsSync(PROJECTS);
@@ -162,8 +162,15 @@ describe.runIf(HAS_REAL)('REAL sweep: newest sessions render all long answers', 
       for (const { f } of newest) {
         const rendered = flat(strip(await loadSessionTranscript({ sessionId: 'x', filePath: f })));
         const lines = fs.readFileSync(f, 'utf-8').split('\n');
+        // Huge sessions are tail-seeked BY DESIGN (TAIL_READ_BYTES): answers
+        // physically before the window cannot render — don't demand them.
+        const windowStart = Math.max(0, fs.statSync(f).size - TAIL_READ_BYTES);
+        let offset = 0;
         let checked = 0;
         for (const raw of lines) {
+          const lineStart = offset;
+          offset += Buffer.byteLength(raw, 'utf-8') + 1;
+          if (windowStart > 0 && lineStart <= windowStart) continue;
           if (!raw.trim()) continue;
           let e: { type?: string; message?: { content?: unknown } };
           try {

@@ -12,9 +12,11 @@
  * with duplicated paragraphs wrapped at different widths — the "скомканная
  * история" the user reported.
  *
- * Strategy: trailing-edge settle debounce (the PTY only hears the FINAL
- * size of an interaction) plus a max-wait cap so a *continuous* drag still
- * updates claude about once a second instead of never.
+ * Strategy: leading edge when idle (a lone resize — tile open, grid step —
+ * reaches the PTY instantly, so freshly-opened tiles size up without lag),
+ * then trailing-edge settle debounce for the rest of the burst (the PTY
+ * only hears the FINAL size of a drag) plus a max-wait cap so a
+ * *continuous* drag still updates claude about once a second.
  */
 
 export interface ResizeCoalescerOptions {
@@ -49,6 +51,7 @@ export function createResizeCoalescer(
 
   let pending: { cols: number; rows: number } | null = null;
   let lastSent: { cols: number; rows: number } | null = null;
+  let lastSendAt = -Infinity;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let maxWaitTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -68,6 +71,7 @@ export function createResizeCoalescer(
     if (!pending) return;
     const { cols, rows } = pending;
     pending = null;
+    lastSendAt = Date.now();
     // Dedupe: dragging out and back to the same size must not repaint.
     if (lastSent && lastSent.cols === cols && lastSent.rows === rows) return;
     lastSent = { cols, rows };
@@ -77,10 +81,22 @@ export function createResizeCoalescer(
   return {
     push(cols: number, rows: number): void {
       pending = { cols, rows };
+      // Leading edge: an isolated resize (no burst in flight, nothing sent
+      // recently) goes out immediately — a freshly-opened tile must not
+      // wait out the settle period to get its real size.
+      if (
+        settleTimer === undefined &&
+        maxWaitTimer === undefined &&
+        Date.now() - lastSendAt >= settleMs
+      ) {
+        deliver();
+        return;
+      }
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = setTimeout(deliver, settleMs);
-      // Max-wait starts on the FIRST push of a burst and is not reset by
-      // subsequent pushes — that's what caps the latency of a long drag.
+      // Max-wait starts on the FIRST queued push of a burst and is not
+      // reset by subsequent pushes — that's what caps the latency of a
+      // long drag.
       if (maxWaitTimer === undefined) {
         maxWaitTimer = setTimeout(deliver, maxWaitMs);
       }

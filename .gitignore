@@ -31,3 +31,6 @@ test-results-html/
 test-results-json/
 playwright-report/
 playwright-full.log
+
+# Bulk-summarize runtime log (scripts/bulk-summarize.cjs)
+scripts/bulk-summarize.log

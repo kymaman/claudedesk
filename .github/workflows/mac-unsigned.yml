@@ -1,9 +1,13 @@
 name: Mac unsigned build
 
-# Manually build an UNSIGNED universal macOS .dmg for an existing release tag
-# and attach it to that release. No Apple Developer certificate / notarization
-# required — same posture as the unsigned Windows installer. Users open it via
-# right-click -> Open (or `xattr -dr com.apple.quarantine ClaudeDesk.app`).
+# Manually build an UNSIGNED Apple Silicon (arm64) macOS .dmg for an existing
+# release tag and attach it to that release. No Apple Developer certificate /
+# notarization required — same posture as the unsigned Windows installer. Users
+# open it via right-click -> Open (or `xattr -dr com.apple.quarantine ClaudeDesk.app`).
+#
+# arm64-only (not universal): the compiled native dep better-sqlite3 is built for
+# the runner's arch only, so a universal x64+arm64 merge would ship an arm64 binary
+# in the x64 slice and crash on Intel. arm64 covers Apple Silicon (M1-M4) Macs.
 
 on:
   workflow_dispatch:
@@ -31,13 +35,13 @@ jobs:
 
       - run: npm ci
 
-      - name: Build unsigned universal macOS dmg
+      - name: Build unsigned arm64 macOS dmg
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
           # Disable code signing entirely. With no signing identity electron-builder
           # also skips notarization, so no Apple credentials are needed.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build -- --universal --publish never -c.mac.notarize=false
+        run: npm run build -- --mac --arm64 --publish never -c.mac.notarize=false
 
       - name: Attach .dmg to the existing release
         env:

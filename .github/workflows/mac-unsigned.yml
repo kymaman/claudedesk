@@ -1,0 +1,45 @@
+name: Mac unsigned build
+
+# Manually build an UNSIGNED universal macOS .dmg for an existing release tag
+# and attach it to that release. No Apple Developer certificate / notarization
+# required — same posture as the unsigned Windows installer. Users open it via
+# right-click -> Open (or `xattr -dr com.apple.quarantine ClaudeDesk.app`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build from and attach the .dmg to'
+        required: true
+        default: 'v0.3.12-stable'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-unsigned:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build unsigned universal macOS dmg
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+          # Disable code signing entirely. With no signing identity electron-builder
+          # also skips notarization, so no Apple credentials are needed.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run build -- --universal --publish never -c.mac.notarize=false
+
+      - name: Attach .dmg to the existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ inputs.tag }}" release/*.dmg --clobber

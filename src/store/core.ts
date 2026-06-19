@@ -67,6 +67,7 @@ export const [store, setStore] = createStore<AppStore>({
   keybindingOverridesByPreset: {},
   keybindingMigrationDismissed: false,
   focusMode: false,
+  onboardingComplete: false,
   taskSplitMode: {},
   lastRightColFocus: {},
 });

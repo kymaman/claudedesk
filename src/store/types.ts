@@ -153,6 +153,7 @@ export interface PersistedState {
   customAgents?: AgentDef[];
   keybindingMigrationDismissed?: boolean;
   focusMode?: boolean;
+  onboardingComplete?: boolean;
 }
 
 // Panel cell IDs. Shell terminals use "shell:0", "shell:1", etc.
@@ -231,6 +232,8 @@ export interface AppStore {
   keybindingOverridesByPreset: Record<string, Record<string, KeybindingOverride>>;
   keybindingMigrationDismissed: boolean;
   focusMode: boolean;
+  /** True once the first-run onboarding wizard has been completed or skipped. */
+  onboardingComplete: boolean;
   /** Per-task flag: true when the task is rendering its focus-mode two-column layout. */
   taskSplitMode: Record<string, boolean>;
   /** Per-task memory of the last right-column cell focused, so crossing ai-terminal and back

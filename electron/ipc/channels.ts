@@ -136,6 +136,9 @@ export enum IPC {
   SummarizeSession = 'summarize_session',
   RenameClaudeSession = 'rename_claude_session',
 
+  // Onboarding — scan the whole computer for claude session folders
+  ScanComputerForSessions = 'scan_computer_for_sessions',
+
   // Session lineage / family tree
   ResolveLiveSession = 'resolve_live_session',
   ListSessionTree = 'list_session_tree',

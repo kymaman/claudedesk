@@ -1,19 +1,26 @@
 /**
  * terminal-wheel.ts — wheel-to-scroll policy for the xterm terminal.
  *
- * The bug («терминал Cd кода не скролится»): Claude Code's TUI runs in the
- * NORMAL buffer but turns on mouse tracking, so xterm forwards wheel ticks
- * to the app as mouse events instead of scrolling its own scrollback — you
- * can't scroll up to re-read code. Stripping claude's escape sequences was
- * tried before and reverted (it garbled the TUI). Instead we take the wheel
- * over in the renderer, never touching claude's stream.
+ * ROOT CAUSE (2026-06-18, proven by e2e diagnostics — «не могу прокрутить
+ * вверх в claude»):
+ *   - claude runs in the NORMAL buffer and repaints its whole conversation
+ *     in place, so xterm's own scrollback stays EMPTY (baseY=0) — there is
+ *     nothing above for the wheel to reach.
+ *   - claude does NOT enable mouse tracking (mouseTrackingMode stayed 'none'
+ *     across every sample), so xterm can never forward the wheel to claude
+ *     as a mouse event.
+ *   - claude DOES scroll its transcript on PageUp / PageDown (verified: the
+ *     view scrolled to earlier messages and PageDown restored it exactly).
  *
- * Behaviour the owner asked for: NO smooth animation — every tick moves
- * WHOLE lines so nothing is half-shown or "skipped" by a blur. The amount
- * scales with how hard the wheel is spun (a gentle notch nudges a few
- * lines, a fast flick moves more), always quantised to whole lines.
+ * So for a claude terminal the ONLY thing that scrolls is sending PageUp /
+ * PageDown to the PTY. The previous hijack here scrolled xterm's always-empty
+ * scrollback and ate the wheel — nothing moved. The fix: for a claude TUI,
+ * translate each wheel notch into PageUp/PageDown and send it to the PTY.
+ * For a plain shell (which fills xterm's own scrollback) we keep the old
+ * whole-line, nothing-skipped scrollback scrolling.
  *
- * Pure / DOM-free so it unit-tests cleanly.
+ * Pure / DOM-free so it unit-tests cleanly (the caller performs the side
+ * effect — scrollLines for a shell, or writing the keys to the PTY).
  */
 
 /** WheelEvent.deltaMode values (PIXEL = 0 is the default / fallthrough). */
@@ -24,6 +31,10 @@ const DELTA_MODE_PAGE = 2;
 const PIXELS_PER_NOTCH = 100; // Chromium on Windows reports ~100–120px/notch
 const LINES_PER_NOTCH_DELTA = 3; // line-mode events report ~3 lines/notch
 
+/** Keys claude scrolls its transcript by (verified empirically). */
+export const PAGE_UP = '\x1b[5~';
+export const PAGE_DOWN = '\x1b[6~';
+
 export interface WheelInput {
   /** WheelEvent.deltaY. */
   deltaY: number;
@@ -31,21 +42,27 @@ export interface WheelInput {
   deltaMode: number;
   /** true while the alternate screen buffer is active (vim/less/etc.). */
   altScreen: boolean;
+  /** true for a claude TUI terminal: it has no usable xterm scrollback and
+   *  no mouse tracking, but scrolls its transcript on PageUp/PageDown. When
+   *  set we translate the wheel into those keys for the PTY. */
+  claudeTui: boolean;
   /** Ctrl held = zoom gesture; leave it for the global zoom handler. */
   ctrlKey: boolean;
-  /** Whole lines to move per ~one wheel notch. */
+  /** Whole lines to move per ~one wheel notch (shell scrollback case). */
   linesPerNotch: number;
 }
 
-export interface WheelPlan {
-  /** Whole lines to scroll (negative = up / back in history). */
-  scrollLines: number;
-  /** When true the caller scrolls xterm itself and stops the event so it
-   *  is NOT also forwarded to the app as a mouse-wheel event. */
-  hijack: boolean;
-}
+export type WheelPlan =
+  /** Let the event bubble untouched (zoom, alternate screen). */
+  | { action: 'ignore' }
+  /** Caller scrolls xterm's own scrollback by this many whole lines (negative
+   *  = up) and stops the event. For plain shells. */
+  | { action: 'scrollback'; scrollLines: number }
+  /** Caller writes this string to the PTY (PageUp/PageDown sequences) and
+   *  stops the event. For claude terminals. */
+  | { action: 'ptyKeys'; data: string };
 
-const NO_OP: WheelPlan = { scrollLines: 0, hijack: false };
+const IGNORE: WheelPlan = { action: 'ignore' };
 
 /** How many wheel "notches" this event represents (can be fractional). */
 function notchesOf(deltaY: number, deltaMode: number): number {
@@ -56,17 +73,27 @@ function notchesOf(deltaY: number, deltaMode: number): number {
 
 /**
  * Decide what a wheel tick over the terminal should do.
- * - Ctrl+wheel → hands off (zoom).
- * - alternate screen → hands off (the full-screen app owns the wheel).
- * - otherwise → scroll a whole number of lines (scaled by spin strength,
- *   at least one line) and hijack the event so mouse-tracking mode can't
- *   swallow it.
+ * - Ctrl+wheel → ignore (zoom).
+ * - alternate screen → ignore (the full-screen app owns the wheel).
+ * - claude TUI → translate to PageUp/PageDown for the PTY (claude scrolls
+ *   its own transcript on those keys; it has no xterm scrollback to move).
+ * - otherwise (a plain shell) → scroll a whole number of xterm scrollback
+ *   lines (scaled by spin strength, at least one line).
  */
 export function planWheelScroll(input: WheelInput): WheelPlan {
-  if (input.ctrlKey || input.altScreen) return NO_OP;
-  if (input.deltaY === 0) return NO_OP;
+  if (input.ctrlKey || input.altScreen) return IGNORE;
+  if (input.deltaY === 0) return IGNORE;
+
   const notches = notchesOf(input.deltaY, input.deltaMode);
-  const dir = notches > 0 ? 1 : -1;
+  const dir = notches > 0 ? 1 : -1; // +1 = wheel down (toward newest), -1 = up
+
+  if (input.claudeTui) {
+    // One page per notch, scaled by spin strength, at least one page.
+    const pages = Math.max(1, Math.round(Math.abs(notches)));
+    const key = dir < 0 ? PAGE_UP : PAGE_DOWN;
+    return { action: 'ptyKeys', data: key.repeat(pages) };
+  }
+
   const lines = Math.max(1, Math.round(Math.abs(notches) * input.linesPerNotch));
-  return { scrollLines: dir * lines, hijack: true };
+  return { action: 'scrollback', scrollLines: dir * lines };
 }

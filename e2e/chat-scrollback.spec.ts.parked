@@ -25,7 +25,13 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { launchApp, closeAllChats } from './helpers.js';
+import { launchApp, closeAllChats, openReadMode } from './helpers.js';
+
+// Variant A (2026-06-17): the conversation the user wheel-scrolls now lives
+// in the read-only TranscriptView (📖), not the live terminal (which stays
+// clean like upstream parallel-code). Resume → open read mode → wheel-scroll
+// the READ pane and assert the visible text changes.
+const READ_XTERM = '.chat-tile__read-pane .xterm';
 
 let app: ElectronApplication;
 let win: Page;
@@ -78,8 +84,8 @@ async function snapshotViewport(): Promise<{
   const deadline = Date.now() + 3_000;
   let lastSeenXterm = false;
   while (Date.now() < deadline) {
-    const result = await win.evaluate(() => {
-      const el = document.querySelector('.chat-tile .xterm') as HTMLElement | null;
+    const result = await win.evaluate((sel) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
       if (!el) return { state: 'no-xterm' as const };
       const t = (el as unknown as XtermInternals).__term;
       if (!t) return { state: 'no-term' as const };
@@ -98,7 +104,7 @@ async function snapshotViewport(): Promise<{
         length: buf.length,
         rows: t.rows,
       };
-    });
+    }, READ_XTERM);
     if (result.state === 'ok') {
       const { text, type, viewportY, baseY, length, rows } = result;
       return { text, type, viewportY, baseY, length, rows };
@@ -107,10 +113,10 @@ async function snapshotViewport(): Promise<{
     await win.waitForTimeout(150);
   }
   throw new Error(
-    `xterm __term not exposed within 3s — ` +
+    `read-pane xterm __term not exposed within 3s — ` +
       (lastSeenXterm
-        ? `.xterm element found but TerminalView never set __term (regression)`
-        : `.chat-tile .xterm never appeared in the DOM`),
+        ? `${READ_XTERM} element found but TranscriptView never set __term (regression)`
+        : `${READ_XTERM} never appeared in the DOM`),
   );
 }
 
@@ -137,14 +143,16 @@ async function tryScrollOneSession(
   await expect(resumeBtn).toBeVisible({ timeout: 5_000 });
   await resumeBtn.click();
 
-  const xterm = win.locator('.chat-tile .xterm').first();
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 12_000 });
+  // Variant A: open the 📖 read pane — that's what the user scrolls now.
+  const xterm = win.locator(READ_XTERM).first();
+  await openReadMode(win).catch(() => undefined);
   await expect(xterm).toBeVisible({ timeout: 12_000 });
   // One extra beat so Solid's onMount runs the __term attachment.
   await win.waitForTimeout(300);
 
-  // Wait for claude TUI to settle (typing indicators + history paint).
-  // We poll up to 12s. We do NOT skip on small-buffer; the user's bug
-  // shows up at the wheel-scroll step regardless of buffer length.
+  // Wait for the read pane to render the transcript. We poll up to 12s. We
+  // do NOT skip on small-buffer; the scroll check runs regardless.
   const deadline = Date.now() + 12_000;
   let initial = await snapshotViewport();
   while (Date.now() < deadline) {

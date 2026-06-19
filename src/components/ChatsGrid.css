@@ -173,6 +173,19 @@
      reported as "chat sometimes shrinks inside". */
   min-width: 0;
   overflow: hidden;
+  /* Positioning context for the live terminal vs. the read-only transcript
+     panes, which stack on top of each other (only one visible at a time). */
+  position: relative;
+}
+
+/* Live claude terminal fills the body — plain xterm, like upstream
+   parallel-code (the read-only history pane was parked; see
+   src/_parked/read-mode/). */
+.chat-tile__live {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Inline title editor — replaces the old window.prompt rename (modal

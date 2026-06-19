@@ -121,16 +121,44 @@ const [_titleOverrides, _setTitleOverrides] = createRoot<RootSig<Map<string, str
   createSignal(new Map<string, string>()),
 );
 
+// Reactive map chatId → the freshest DISK/alias title of the chat's session.
+// Kept in sync by an effect in App.tsx that watches the sessions() list, so an
+// open tile's header always shows the SAME title as the History row for that
+// session (the user's «название слева в истории и сверху над терминалом — одни
+// задачи»). It's a separate signal from chat.title (a stale plain field) so
+// updating it re-renders titleFor WITHOUT replacing the chat object — replacing
+// it would remount the tile and KillAgent the PTY (see renameChat). Fed from
+// chats.ts's side of the dependency (sessions-history already imports chats, so
+// chats must NOT import sessions — the effect lives in App.tsx, which imports
+// both, and calls setDiskTitleForChat).
+const [_diskTitles, _setDiskTitles] = createRoot<RootSig<Map<string, string>>>(() =>
+  createSignal(new Map<string, string>()),
+);
+
+/** Sync a chat's live disk/session title (called by App.tsx's sessions effect). */
+export function setDiskTitleForChat(chatId: string, title: string): void {
+  const cur = _diskTitles().get(chatId);
+  if (cur === title) return; // no-op — don't churn the signal
+  _setDiskTitles((prev) => {
+    const next = new Map(prev);
+    next.set(chatId, title);
+    return next;
+  });
+}
+
 export const chats = _chats;
 export const activeChatId = _activeChatId;
 
 /**
- * Returns the latest title for a chat. Reactive: subscribers re-run
- * when `renameChat` bumps `_titleTick`. Use this everywhere the title
- * is rendered — `chat.title` directly is a stale read.
+ * Returns the latest title for a chat. Reactive: re-runs when a manual rename
+ * (`_titleOverrides`) or a live disk/session title (`_diskTitles`) changes.
+ * Precedence: manual rename > live disk/alias title > the chat's own (possibly
+ * stale) base title. The disk tier is what keeps the tile header and the
+ * History row showing the same thing. Use this everywhere the title is
+ * rendered — `chat.title` directly is a stale read.
  */
 export function titleFor(chat: Pick<Chat, 'id' | 'title'>): string {
-  return _titleOverrides().get(chat.id) ?? chat.title;
+  return _titleOverrides().get(chat.id) ?? _diskTitles().get(chat.id) ?? chat.title;
 }
 
 /**
@@ -277,29 +305,95 @@ function buildChat(params: {
  * over, so History and the family tree stay coherent.
  */
 const LIVE_WATCH_MS = 180_000;
+
+/**
+ * Session ids currently owned by OTHER open tiles (live + past). A
+ * branched tile must never adopt one of these: when you fork session
+ * S0, the parent's own continuation AND the fork both copy S0's last
+ * message uuid, so the resolver matches BOTH files. Without this
+ * exclusion every watcher gets the same newest file and the two tiles
+ * glue onto one live session — the user sees "одна и та же переписка в
+ * двух окнах". Excluding sibling-owned ids lets each tile land on its
+ * OWN distinct continuation.
+ */
+function siblingSessionIds(exceptChatId: string): string[] {
+  const ids = new Set<string>();
+  for (const c of _chats()) {
+    if (c.closed || c.id === exceptChatId) continue;
+    if (c.sessionId) ids.add(c.sessionId);
+    for (const p of c.pastSessionIds ?? []) ids.add(p);
+  }
+  return [...ids];
+}
+
 function watchLiveSession(chatId: string): void {
   if (typeof window === 'undefined') return;
   const chat = _chats().find((c) => c.id === chatId);
   if (!chat?.sessionId) return;
   const originalSid = chat.sessionId;
+  const sinceMs = Date.now() - 5_000;
   invoke<{ sessionId: string; changed: boolean }>(IPC.ResolveLiveSession, {
     sessionId: originalSid,
-    sinceMs: Date.now() - 5_000,
+    sinceMs,
     waitMs: LIVE_WATCH_MS,
+    excludeSessionIds: siblingSessionIds(chatId),
   })
-    .then((res) => {
-      if (!res?.changed) return;
-      adoptLiveSessionId(chatId, originalSid, res.sessionId);
-    })
+    .then((res) => claimLiveSession(chatId, originalSid, sinceMs, res))
     .catch((err) => {
       console.warn('[chats] watch live session failed:', err);
     });
+}
+
+/**
+ * Adopt a resolved live session id — but never one a sibling tile
+ * already owns. The renderer is single-threaded, so two watchers that
+ * both resolve to the same newest continuation run their callbacks in
+ * sequence: the first adopts it, the second sees it taken and re-scans
+ * with that id excluded, landing on its OWN fork instead of gluing onto
+ * its peer. Bounded retry guards against a pathological loop.
+ */
+async function claimLiveSession(
+  chatId: string,
+  fromSid: string,
+  sinceMs: number,
+  res: { sessionId: string; changed: boolean } | undefined,
+  depth = 0,
+): Promise<void> {
+  if (!res?.changed) return;
+  const taken = new Set(siblingSessionIds(chatId));
+  if (taken.has(res.sessionId)) {
+    if (depth >= 3) return; // give up rather than glue onto a peer
+    try {
+      const next = await invoke<{ sessionId: string; changed: boolean }>(IPC.ResolveLiveSession, {
+        sessionId: fromSid,
+        sinceMs,
+        waitMs: 0,
+        excludeSessionIds: [...taken],
+      });
+      return await claimLiveSession(chatId, fromSid, sinceMs, next, depth + 1);
+    } catch (err) {
+      console.warn('[chats] claim live session retry failed:', err);
+      return;
+    }
+  }
+  adoptLiveSessionId(chatId, fromSid, res.sessionId);
 }
 
 /** Move a chat onto its live session id (no-op if the chat moved on). */
 function adoptLiveSessionId(chatId: string, fromSid: string, liveSid: string): void {
   const cur = _chats().find((c) => c.id === chatId);
   if (!cur || cur.closed || cur.sessionId !== fromSid || fromSid === liveSid) return;
+  // Defensive: never adopt a session another open tile already owns —
+  // that glue IS the "same conversation in two tiles" bug. claimLiveSession
+  // normally prevents reaching here, but branchChat's last-moment scan
+  // calls adopt directly.
+  const takenByPeer = _chats().some(
+    (c) =>
+      c.id !== chatId &&
+      !c.closed &&
+      (c.sessionId === liveSid || (c.pastSessionIds?.includes(liveSid) ?? false)),
+  );
+  if (takenByPeer) return;
   _setChats((prev) =>
     prev.map((c) =>
       c.id === chatId
@@ -538,6 +632,7 @@ export async function branchChat(chatId: string): Promise<Chat | null> {
         sessionId: src.sessionId,
         sinceMs: src.createdAt - 5_000,
         waitMs: 0,
+        excludeSessionIds: siblingSessionIds(src.id),
       });
       if (res?.changed) {
         adoptLiveSessionId(src.id, src.sessionId, res.sessionId);
@@ -637,9 +732,19 @@ export function renameChat(chatId: string, title: string): void {
     next.set(chatId, title);
     return next;
   });
-  // Also write the new title onto the chat object in the array so
-  // persistence (and any non-titleFor reader) sees it.
-  _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
+  // Write the new title onto the chat object so persistence (and any
+  // non-titleFor reader) sees it — but MUTATE IN PLACE. We must NOT do
+  // `_setChats(prev.map(c => ({...c, title})))`: that creates a NEW chat
+  // object, and Solid's `<For>` keys items by reference identity, so the
+  // ChatTile → TerminalView subtree unmounts and remounts. onCleanup then
+  // fires KillAgent → a ConPTY teardown that races the surrounding native
+  // PTY work and corrupts the heap on Windows (c0000374) — confirmed from a
+  // crash dump and an e2e that died on rename. Mutating in place keeps the
+  // ref stable so the PTY survives — the exact contract _lastActiveAtById
+  // relies on. Reactive display is already handled by _setTitleOverrides
+  // above; persistOpenChats reads chat.title at flush time.
+  const target = _chats().find((c) => c.id === chatId);
+  if (target) target.title = title;
   schedulePersistOpenChats();
 
   // Persist the rename as a session ALIAS so it survives after the
@@ -855,7 +960,7 @@ export function restoreOpenChats(): void {
     };
     let restoredChat: Chat | null = null;
     if (p.sessionId) {
-      // Synthesize the minimal SessionItem shape openChatFromSession wants.
+      // Synthesize the minimal SessionItem shape the open helpers want.
       // We don't have the full original record (folderIds, date, etc.)
       // — those don't matter for resume.
       const fakeSession: SessionItem = {
@@ -866,7 +971,20 @@ export function restoreOpenChats(): void {
         filePath: '',
         folderIds: [],
       };
-      restoredChat = openChatFromSession(fakeSession, settings);
+      if (p.forkParent && p.sessionId === p.forkParent.sessionId) {
+        // An undiverged branch: it never wrote its own JSONL (the user
+        // didn't send a message before quitting), so it still shares the
+        // parent's session id. A plain --resume would dedup onto the
+        // restored parent tile and the branch would vanish — the "my
+        // branch disappeared after reopen" bug. Re-fork it instead so it
+        // comes back as a SEPARATE dialog (bypasses dedup, keeps
+        // --fork-session).
+        // This restore path only handles non-project (global) chats, so
+        // the workspace is always null.
+        restoredChat = branchChatFromSession(fakeSession, settings, { projectId: null });
+      } else {
+        restoredChat = openChatFromSession(fakeSession, settings);
+      }
     } else {
       restoredChat = openFreshChat({
         id: p.id,

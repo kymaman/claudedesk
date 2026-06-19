@@ -32,6 +32,11 @@ export type InjectedDelivery = 'ignore' | 'type' | 'paste';
  *                block, deliver via bracketed paste to avoid premature
  *                submit (the erase bug).
  *   - 'type'   : single-line phrase — real dictation, deliver raw.
+ *
+ * NOTE: this function only decides HOW to deliver text that has already
+ * been judged to be a genuine injection. Whether the textarea write is a
+ * genuine injection vs. xterm's right-click copy-mirror is a separate
+ * decision — see isSelectionMirror() in selection-mirror.ts.
  */
 export function classifyInjectedText(text: string): InjectedDelivery {
   if (text.length <= 1) return 'ignore';

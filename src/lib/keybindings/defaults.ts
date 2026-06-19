@@ -276,6 +276,20 @@ export const DEFAULT_BINDINGS: KeyBinding[] = [
     action: 'copy',
   },
   {
+    // Classic Windows-terminal behaviour: plain Ctrl+C copies when there
+    // IS a selection, and falls through to SIGINT (^C) when there isn't —
+    // the copy handler in TerminalView only preventDefaults on a non-empty
+    // selection, so an empty-selection Ctrl+C still interrupts the process.
+    id: 'term.copy-ctrl-c',
+    layer: 'terminal',
+    category: 'Clipboard',
+    description: 'Copy selection / interrupt (Ctrl+C, Windows style)',
+    platform: 'linux',
+    key: 'c',
+    modifiers: { ctrl: true },
+    action: 'copy',
+  },
+  {
     id: 'term.paste',
     layer: 'terminal',
     category: 'Clipboard',

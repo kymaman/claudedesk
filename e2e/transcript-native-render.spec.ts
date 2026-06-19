@@ -26,7 +26,7 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { launchApp, closeAllChats, awaitChatReady, BridgeWindow } from './helpers.js';
+import { launchApp, closeAllChats, awaitChatReady, openReadMode, BridgeWindow } from './helpers.js';
 
 let app: ElectronApplication;
 let win: Page;
@@ -47,18 +47,6 @@ test.afterAll(async () => {
   }
   await app.close();
 });
-
-interface XtermInternals {
-  __term?: {
-    rows: number;
-    buffer: {
-      active: {
-        length: number;
-        getLine: (i: number) => { translateToString: (t?: boolean) => string } | undefined;
-      };
-    };
-  };
-}
 
 // Bare old-renderer structural signature: a line that is EXACTLY a
 // header or a 40-dash rule (after ANSI strip + trim of trailing CR).
@@ -141,53 +129,104 @@ test('renderer never emits old structural format across many REAL sessions (via 
   ).toBeGreaterThanOrEqual(1);
 });
 
-// eslint-disable-next-line no-empty-pattern -- need testInfo; fixture is unused
-test('a real session renders natively in the live xterm (visual + screenshot)', async ({}, info) => {
+/**
+ * VARIANT A (2026-06-17) — the LIVE terminal must NOT pre-seed history.
+ *
+ * DISCRIMINATOR (why this is an IPC spy, not a buffer-content check):
+ * an earlier version of this test asserted the live xterm had no ● / ⎿
+ * markers. That was a FALSE-POSITIVE trap — `claude --resume` itself
+ * prints ● bullets when it replays its last message / tool result into
+ * the live TUI (e.g. "● Background command … completed"). So ● in the
+ * live buffer does NOT prove a pre-seed.
+ *
+ * The unambiguous signal: a pre-seed is the live terminal calling
+ * `load_session_transcript`. Without prefill the live spawn NEVER calls
+ * it; only read mode (📖, the TranscriptView) does. We spy on the IPC
+ * bridge and assert the channel breakdown:
+ *   - resume (live only)  → load_session_transcript NOT called  [variant A]
+ *   - open read mode (📖) → load_session_transcript IS called   [history reachable]
+ *
+ * RED on the old (prefill) build: resume calls load_session_transcript for
+ * the live terminal → first assertion fails. GREEN after variant A: it
+ * isn't called until 📖 opens. Deterministic; claude's native ● can't fool
+ * it.
+ *
+ * HOW THE SPY WORKS (and how it must NOT): monkeypatching
+ * window.electron.ipcRenderer.invoke does NOT work — Electron's contextBridge
+ * deep-freezes the exposed object, so the reassignment silently no-ops (an
+ * earlier attempt saw an empty channel list). Instead the product invoke()
+ * (src/lib/ipc.ts) pushes each channel onto window.__ipcSpy when that array
+ * exists; the test arms it by setting window.__ipcSpy = [] before resuming.
+ * No-op in production (flag never set), same pattern as the __term exposure.
+ */
+type SpyWindow = { __ipcSpy?: string[] };
+
+// The single channel that proves a transcript pre-seed. Kept as a literal so
+// the test reads naturally; it is the value of IPC.LoadSessionTranscript (see
+// electron/ipc/channels.ts) and is also the channel TranscriptView/read mode
+// uses, so the read-mode half of the assertion exercises the same string.
+const TRANSCRIPT_CHANNEL = 'load_session_transcript';
+
+test('VARIANT A: resuming does NOT load the transcript into the live terminal (IPC spy)', async () => {
   await win.locator('.ts-nav', { hasText: 'History' }).click();
-  await win.waitForTimeout(400);
+  // Cold-start robustness: History scans ~/.claude/projects and can take
+  // seconds to populate. Wait for the first row before deciding to skip —
+  // a flat 400ms wait spuriously reported "0 sessions" on a fresh launch
+  // (which made a RED run skip instead of fail).
+  await win
+    .locator('.session-item')
+    .first()
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .catch(() => undefined);
   const total = await win.locator('.session-item').count();
   if (total === 0) test.skip(true, 'No real History sessions on disk');
 
-  // Open sessions until we land on one that actually has rendered
-  // history (length > rows), then assert native markers + screenshot.
-  let proven = false;
-  for (let i = 0; i < Math.min(total, 6) && !proven; i += 1) {
-    await win.locator('.ts-nav', { hasText: 'History' }).click();
-    await win.waitForTimeout(300);
-    const row = win.locator('.session-item').nth(i);
-    await expect(row).toBeVisible({ timeout: 6_000 });
-    await row.locator('.session-item__resume').click();
-    const xterm = win.locator('.chat-tile .xterm').first();
-    await expect(xterm).toBeVisible({ timeout: 15_000 });
-    await awaitChatReady(win, 12_000).catch(() => undefined);
-    await win.waitForTimeout(4_500);
+  // Arm the spy BEFORE resuming. The product `invoke()` (src/lib/ipc.ts)
+  // pushes every channel onto window.__ipcSpy when this array exists — this
+  // is the RELIABLE path (monkeypatching window.electron fails: contextBridge
+  // objects are frozen, which is why an earlier version of this test saw an
+  // empty channel list).
+  await win.evaluate(() => {
+    (window as unknown as SpyWindow).__ipcSpy = [];
+  });
 
-    const buf = await win.evaluate(() => {
-      const el = document.querySelector('.chat-tile .xterm') as HTMLElement | null;
-      const t = el ? (el as unknown as XtermInternals).__term : undefined;
-      if (!t) return null;
-      const b = t.buffer.active;
-      const lines: string[] = [];
-      for (let k = 0; k < b.length; k += 1) lines.push(b.getLine(k)?.translateToString(true) ?? '');
-      return { text: lines.join('\n'), length: b.length, rows: t.rows };
-    });
+  // Resume a session — LIVE terminal only. Do NOT open read mode yet.
+  const row = win.locator('.session-item').first();
+  await expect(row).toBeVisible({ timeout: 6_000 });
+  await row.locator('.session-item__resume').click();
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 15_000 });
+  await awaitChatReady(win, 12_000).catch(() => undefined);
+  // Give any (forbidden) prefill its full 3s safety-gate window to fire.
+  await win.waitForTimeout(4_000);
 
-    if (buf && buf.length > buf.rows + 5) {
-      await info.attach(`native-session-${i}.png`, {
-        body: await xterm.screenshot(),
-        contentType: 'image/png',
-      });
-      await info.attach(`native-session-${i}.txt`, {
-        body: Buffer.from(buf.text.slice(-2500), 'utf8'),
-        contentType: 'text/plain; charset=utf-8',
-      });
-      const native = buf.text.includes('●') || buf.text.includes('⎿') || /(^|\n)❯\s/.test(buf.text);
-      expect(native, `session #${i} buffer lacks any native marker`).toBe(true);
-      proven = true;
-    }
-    await closeAllChats(win);
-    await win.waitForTimeout(400);
-  }
+  const liveCalls = await win.evaluate(() =>
+    ((window as unknown as SpyWindow).__ipcSpy ?? []).slice(),
+  );
+  // Guard against a silently-disarmed spy: the live spawn always invokes
+  // SOMETHING (spawn_agent, terminal defaults, …). An empty list means the
+  // spy never recorded — which would make the next assertion vacuously pass.
+  expect(
+    liveCalls.length,
+    'IPC spy recorded nothing — the window.__ipcSpy hook is not wired (test would be vacuous).',
+  ).toBeGreaterThan(0);
+  expect(
+    liveCalls.includes(TRANSCRIPT_CHANNEL),
+    `Variant A: the LIVE terminal must NOT pre-seed history, but it invoked ` +
+      `${TRANSCRIPT_CHANNEL} on resume. Channels seen:\n${liveCalls.join(', ')}`,
+  ).toBe(false);
 
-  expect(proven, 'no real session had renderable history to verify').toBe(true);
+  // GREEN second half: opening read mode (📖) DOES load the transcript —
+  // history is still reachable, just relocated out of the live terminal.
+  await openReadMode(win).catch(() => undefined);
+  await win.waitForTimeout(800);
+  const afterRead = await win.evaluate(() =>
+    ((window as unknown as SpyWindow).__ipcSpy ?? []).slice(),
+  );
+  expect(
+    afterRead.includes(TRANSCRIPT_CHANNEL),
+    `Read mode (📖) must load the transcript so history stays reachable. ` +
+      `Channels seen:\n${afterRead.join(', ')}`,
+  ).toBe(true);
+
+  await closeAllChats(win);
 });

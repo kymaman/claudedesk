@@ -64,6 +64,8 @@ import { createCtrlWheelZoomHandler } from './lib/wheelZoom';
 import { ArenaOverlay } from './arena/ArenaOverlay';
 import { startDesktopNotificationWatcher } from './store/desktopNotifications';
 import { startPrChecksSubscription } from './store/pr-checks';
+import { openChats, setDiskTitleForChat } from './store/chats';
+import { sessions } from './store/sessions-history';
 
 const MIN_WINDOW_DIMENSION = 100;
 
@@ -251,6 +253,23 @@ function App() {
   // Toggle font smoothing CSS class on body
   createEffect(() => {
     document.body.classList.toggle('font-smoothing', store.fontSmoothing);
+  });
+
+  // Unify titles: keep every open tile's header title in sync with the
+  // freshest DISK/alias title of its session — the same source the History
+  // list shows — so «название слева в истории и сверху над терминалом» are one
+  // and the same. We feed chats.ts's reactive disk-title map (NOT chat.title,
+  // which would remount the tile and kill the PTY). Manual renames still win
+  // (titleFor prefers the override). Lives here because App can import both
+  // stores without the chats↔sessions cycle.
+  createEffect(() => {
+    const byId = new Map<string, string>();
+    for (const s of sessions()) if (s.sessionId && s.title) byId.set(s.sessionId, s.title);
+    for (const c of openChats()) {
+      if (!c.sessionId) continue;
+      const diskTitle = byId.get(c.sessionId);
+      if (diskTitle) setDiskTitleForChat(c.id, diskTitle);
+    }
   });
 
   // Apply zoom via Electron's webFrame so window.devicePixelRatio scales with it.

@@ -62,6 +62,7 @@ export async function saveState(): Promise<void> {
     customAgents: store.customAgents.length > 0 ? [...store.customAgents] : undefined,
     keybindingMigrationDismissed: store.keybindingMigrationDismissed || undefined,
     focusMode: store.focusMode || undefined,
+    onboardingComplete: store.onboardingComplete || undefined,
   };
 
   for (const taskId of store.taskOrder) {
@@ -216,6 +217,7 @@ interface LegacyPersistedState {
   terminals?: unknown;
   keybindingMigrationDismissed?: unknown;
   focusMode?: unknown;
+  onboardingComplete?: unknown;
 }
 
 export async function loadState(): Promise<void> {
@@ -362,6 +364,10 @@ export async function loadState(): Promise<void> {
 
       if (typeof raw.keybindingMigrationDismissed === 'boolean') {
         s.keybindingMigrationDismissed = raw.keybindingMigrationDismissed;
+      }
+
+      if (typeof raw.onboardingComplete === 'boolean') {
+        s.onboardingComplete = raw.onboardingComplete;
       }
 
       // Make custom agents findable during task restoration

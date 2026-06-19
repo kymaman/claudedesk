@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_BINDINGS } from '../defaults';
+import { matchesKeyEvent } from '../match';
 
 const APP_LAYER_IDS = [
   'app.nav.row-up',
@@ -28,6 +29,7 @@ const APP_LAYER_IDS = [
 const TERMINAL_LAYER_IDS = [
   'term.copy',
   'term.copy-linux',
+  'term.copy-ctrl-c',
   'term.paste',
   'term.paste-linux',
   'term.shift-enter',
@@ -35,6 +37,20 @@ const TERMINAL_LAYER_IDS = [
   'term.end',
   'term.kill-line',
 ];
+
+// Synthetic KeyboardEvent-lite for matchesKeyEvent (only the fields it reads).
+function keyEvent(
+  key: string,
+  mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean } = {},
+): KeyboardEvent {
+  return {
+    key,
+    ctrlKey: !!mods.ctrl,
+    shiftKey: !!mods.shift,
+    altKey: !!mods.alt,
+    metaKey: !!mods.meta,
+  } as KeyboardEvent;
+}
 
 describe('DEFAULT_BINDINGS', () => {
   it('contains all expected app-layer shortcuts', () => {
@@ -75,6 +91,35 @@ describe('DEFAULT_BINDINGS', () => {
         `Terminal-layer binding "${binding.id}" has neither action nor escapeSequence`,
       ).toBe(true);
     }
+  });
+
+  // Bug (2026-06-15): on Windows/Linux the user expects plain Ctrl+C to
+  // copy the active terminal selection (classic Windows-terminal behaviour),
+  // falling through to SIGINT only when nothing is selected. Previously copy
+  // was bound to Ctrl+Shift+C only.
+  describe('Ctrl+C copies the selection on Windows/Linux', () => {
+    const requireCopyCtrlC = () => {
+      const b = DEFAULT_BINDINGS.find((x) => x.id === 'term.copy-ctrl-c');
+      if (!b) throw new Error('term.copy-ctrl-c binding is missing');
+      return b;
+    };
+
+    it('the binding exists, is a terminal copy action, on the non-mac platform', () => {
+      const b = requireCopyCtrlC();
+      expect(b.layer).toBe('terminal');
+      expect(b.action).toBe('copy');
+      expect(b.platform).toBe('linux'); // 'linux' resolves to "not mac" (incl. Windows)
+    });
+
+    it('matches a bare Ctrl+C keypress (no shift)', () => {
+      expect(matchesKeyEvent(keyEvent('c', { ctrl: true }), requireCopyCtrlC())).toBe(true);
+    });
+
+    it('does NOT match when Shift is held (that is the existing copy-linux binding)', () => {
+      expect(matchesKeyEvent(keyEvent('C', { ctrl: true, shift: true }), requireCopyCtrlC())).toBe(
+        false,
+      );
+    });
   });
 
   it('platform:both bindings do not use meta without cmdOrCtrl', () => {

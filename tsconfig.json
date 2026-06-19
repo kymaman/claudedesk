@@ -21,5 +21,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "electron/ipc/channels.ts"]
+  "include": ["src", "electron/ipc/channels.ts"],
+  "exclude": ["src/_parked"]
 }

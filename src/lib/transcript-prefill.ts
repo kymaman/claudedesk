@@ -28,3 +28,21 @@ export interface PrefillInput {
 export function shouldWriteTranscript(input: PrefillInput): boolean {
   return input.termAlive && typeof input.transcript === 'string' && input.transcript.length > 0;
 }
+
+/**
+ * VARIANT A (2026-06-17): should the LIVE terminal pre-seed session history?
+ *
+ * false = Variant A ON — the live xterm stays clean (pure PTY, like upstream
+ * parallel-code). Mixing a static JSONL render with claude's live TUI
+ * repaints produced the «надлом/каша» seam on resize. History now lives
+ * in the read-only TranscriptView (📖 toggle), which renders the SAME JSONL
+ * without competing with the live TUI. No empty resumed tiles (📖 always has
+ * the history), no seam in the live view.
+ *
+ * To revert to prefill: change `return false` → `return true` here AND
+ * rebuild. The unit test in transcript-prefill.test.ts will catch any
+ * accidental re-enable (it asserts === false).
+ */
+export function shouldLiveTerminalPrefill(): boolean {
+  return false;
+}

@@ -42,6 +42,15 @@ export class Channel<T> {
 }
 
 export async function invoke<T>(cmd: IPC, args?: Record<string, unknown>): Promise<T> {
+  // Test-only IPC spy. An e2e test sets `window.__ipcSpy = []` before an
+  // action, then reads which channels were invoked. We record HERE — on the
+  // real call path — because monkeypatching `window.electron.ipcRenderer`
+  // does NOT work: Electron's contextBridge deep-freezes exposed objects, so
+  // a reassignment of `.invoke` silently no-ops. No-op in production (the
+  // flag is never set); negligible cost when it is. See
+  // e2e/transcript-native-render.spec.ts (variant-A prefill guard).
+  const spy = (window as unknown as { __ipcSpy?: string[] }).__ipcSpy;
+  if (spy) spy.push(cmd);
   // JSON round-trip ensures all args are structured-clone-safe.
   // Triggers Channel.toJSON() to replace Channel instances with
   // plain { __CHANNEL_ID__: id } objects.

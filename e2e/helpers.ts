@@ -73,8 +73,12 @@ export async function openOneChat(win: Page): Promise<void> {
   const firstRow = win.locator('.session-item').first();
   if ((await firstRow.count()) === 0) test.skip(true, 'No sessions available to open a chat');
   await firstRow.locator('.session-item__resume').click();
-  await expect(win.locator('.chat-tile').first()).toBeVisible({ timeout: 5_000 });
-  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 5_000 });
+  // Resuming spawns a real `claude --resume` process; on a busy/slow
+  // machine the tile can take well over 5s to mount. The old 5s timeout
+  // flaked here. A larger ceiling only reduces flakes — a fast resume
+  // still resolves immediately.
+  await expect(win.locator('.chat-tile').first()).toBeVisible({ timeout: 20_000 });
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 20_000 });
   await awaitChatReady(win);
 }
 
@@ -126,6 +130,80 @@ export async function awaitChatReady(
   // that prints something on startup, which is fine for `claude` but
   // brittle for shells.
   console.warn(`[awaitChatReady] no PTY output in ${timeoutMs}ms — proceeding anyway`);
+}
+
+/**
+ * Switch the first chat tile into clean read mode (the 📖 toggle) and
+ * wait for the read pane's xterm to mount and expose `__term`.
+ *
+ * Variant A (2026-06-17): the LIVE terminal no longer pre-seeds session
+ * history — it stays clean like upstream parallel-code. The full,
+ * scrollable conversation now lives in the read-only TranscriptView. So
+ * every "scroll up N lines of history" guarantee is verified HERE, in the
+ * read pane, not in the live terminal. Returns the read-pane xterm
+ * selector for callers to drive.
+ */
+export async function openReadMode(win: Page): Promise<string> {
+  const READ_SELECTOR = '.chat-tile__read-pane .xterm';
+  await win.locator('.chat-tile__read').first().click();
+  await expect(win.locator(READ_SELECTOR).first()).toBeVisible({ timeout: 10_000 });
+  // TranscriptView attaches __term AFTER fit (onMount), and loads the
+  // JSONL transcript async — wait for content to actually land so callers
+  // don't snapshot an empty buffer.
+  await awaitChatReady(win, 15_000, READ_SELECTOR);
+  return READ_SELECTOR;
+}
+
+/**
+ * Resume a History session that actually has a CONVERSATION (so there is
+ * something to scroll). Some sessions — e.g. a fresh Ask/Assistant session —
+ * resume to just claude's welcome banner with nothing above; scroll tests on
+ * those are meaningless and flake depending on which session sorts first.
+ *
+ * Tries up to `maxTries` of the most-recent sessions, resuming each and
+ * checking the live buffer for claude conversation markers (● / ⎿). Returns
+ * true once a content session is open; skips the spec if none is found.
+ */
+export async function openChatWithHistory(win: Page, maxTries = 6): Promise<boolean> {
+  await win.locator('.ts-nav', { hasText: 'History' }).click();
+  await win
+    .locator('.session-item')
+    .first()
+    .waitFor({ state: 'visible', timeout: 30_000 })
+    .catch(() => undefined);
+  const total = await win.locator('.session-item').count();
+  if (total === 0) {
+    test.skip(true, 'No real History sessions on disk');
+    return false;
+  }
+  const tries = Math.min(maxTries, total);
+  for (let i = 0; i < tries; i++) {
+    await win.locator('.ts-nav', { hasText: 'History' }).click();
+    await win.waitForTimeout(200);
+    await win.locator('.session-item').nth(i).locator('.session-item__resume').click();
+    await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 45_000 });
+    await awaitChatReady(win, 30_000).catch(() => undefined);
+    await win.waitForTimeout(3_000);
+    const hasContent = await win.evaluate(() => {
+      interface X {
+        __term?: { buffer: { active: { length: number; getLine(i: number): unknown } } };
+      }
+      const el = document.querySelector('.chat-tile .xterm') as unknown as X;
+      const term = el?.__term;
+      if (!term) return false;
+      const b = term.buffer.active;
+      for (let j = 0; j < b.length; j++) {
+        const line = b.getLine(j) as { translateToString(t: boolean): string } | undefined;
+        const s = line?.translateToString(true) ?? '';
+        if (s.includes('●') || s.includes('⎿')) return true;
+      }
+      return false;
+    });
+    if (hasContent) return true;
+    await closeAllChats(win); // banner-only — try the next session
+  }
+  test.skip(true, 'No History session with a scrollable conversation found');
+  return false;
 }
 
 /** Close every chat tile on screen. force-clicks so display:none'd

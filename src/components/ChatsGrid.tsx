@@ -22,6 +22,7 @@ import {
 import { TerminalView } from './TerminalView';
 import { DragMime, acceptDrag, dragHasMime, handleDrop, setDragPayload } from '../lib/drag-mime';
 import { markDirty } from '../lib/terminalFitManager';
+import { isCommitKey, isCancelKey } from '../lib/rename-key';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import './ChatsGrid.css';
@@ -134,6 +135,8 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
   }
 
   function commitRename() {
+    // Dedupe the onBlur that fires when Enter unmounts the input.
+    if (!editingTitle()) return;
     const next = titleDraft().trim();
     setEditingTitle(false);
     if (next && next !== titleFor(props.chat)) renameChat(props.chat.id, next);
@@ -232,11 +235,15 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
             value={titleDraft()}
             onInput={(e) => setTitleDraft(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              // IME-safe — Enter during Russian/dictation composition must
+              // not commit (it crashes the renderer). See lib/rename-key.ts.
+              if (isCommitKey(e)) {
                 e.preventDefault();
                 commitRename();
+              } else if (isCancelKey(e)) {
+                e.preventDefault();
+                setEditingTitle(false);
               }
-              if (e.key === 'Escape') setEditingTitle(false);
             }}
             onBlur={commitRename}
             onClick={(e) => e.stopPropagation()}
@@ -347,21 +354,26 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
         </Show>
       </div>
       <div class="chat-tile__body" ref={bodyRef}>
-        <TerminalView
-          taskId={props.chat.id}
-          agentId={props.chat.id}
-          command={props.chat.command}
-          args={props.chat.args}
-          cwd={props.chat.cwd}
-          env={props.chat.env}
-          isShell={false}
-          fontSize={13}
-          // The active tile auto-focuses on mount AND every time it
-          // becomes active (TerminalView's createEffect on isFocused).
-          // autoFocus on first mount handles the very first chat open.
-          autoFocus={isActive()}
-          isFocused={isActive()}
-        />
+        {/* Live claude terminal — plain xterm, like upstream parallel-code.
+            (The clean read-only history view was parked in
+            src/_parked/read-mode/ — see that folder's README to restore.) */}
+        <div class="chat-tile__live">
+          <TerminalView
+            taskId={props.chat.id}
+            agentId={props.chat.id}
+            command={props.chat.command}
+            args={props.chat.args}
+            cwd={props.chat.cwd}
+            env={props.chat.env}
+            isShell={false}
+            fontSize={13}
+            // The active tile auto-focuses on mount AND every time it
+            // becomes active (TerminalView's createEffect on isFocused).
+            // autoFocus on first mount handles the very first chat open.
+            autoFocus={isActive()}
+            isFocused={isActive()}
+          />
+        </div>
       </div>
     </div>
   );

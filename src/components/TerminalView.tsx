@@ -18,11 +18,13 @@ import { mergeSpawnArgs, mergeSpawnEnv } from '../lib/terminal-spawn-merge';
 import { filterArgsBySupport } from '../lib/agent-args-filter';
 import { listenXtermBridge } from '../lib/xterm-bridge';
 import { classifyInjectedText } from '../lib/injected-text';
+import { isSelectionMirror } from '../lib/selection-mirror';
 import { resolveFileLink } from '../lib/file-link-resolve';
 import { extractFileLinkCandidates, stripLineColSuffix } from '../lib/terminal-file-links';
 import { createResizeCoalescer } from '../lib/terminal-resize-coalescer';
 import { registerTerminal, unregisterTerminal, markDirty } from '../lib/terminalFitManager';
-import { shouldWriteTranscript } from '../lib/transcript-prefill';
+import { shouldWriteTranscript, shouldLiveTerminalPrefill } from '../lib/transcript-prefill';
+import { shouldAutoConfirmFolderTrust } from '../lib/auto-trust';
 import { planWheelScroll } from '../lib/terminal-wheel';
 import type { PtyOutput } from '../ipc/types';
 
@@ -100,11 +102,26 @@ function getTerminalBindings() {
   return resolvedBindings().filter((b) => b.layer === 'terminal');
 }
 
+/** True when the spawn command is a claude binary (claude / claude.exe / …). */
+function isClaudeCommand(command: string | undefined): boolean {
+  return /(^|[\\/])claude(?:\.(?:exe|cmd|bat))?$/i.test(command ?? '');
+}
+
 export function TerminalView(props: TerminalViewProps) {
   let containerRef!: HTMLDivElement;
   let term: Terminal | undefined;
   let fitAddon: FitAddon | undefined;
   let webglAddon: WebglAddon | undefined;
+
+  // A claude (non-shell) terminal: it repaints in place and has no usable
+  // xterm scrollback, but it DOES scroll its own transcript on PageUp/PageDown
+  // (and shows its "Jump to bottom (ctrl+End)" hint). So for claude we
+  // translate the wheel into those keys and send them to the PTY — claude does
+  // the scrolling. A plain shell instead uses xterm's own scrollback below.
+  // command/isShell are fixed for a tile's lifetime, so reading them once (not
+  // reactively) is correct.
+  // eslint-disable-next-line solid/reactivity -- command/isShell are stable for the tile
+  const claudeTuiTerminal = isClaudeCommand(props.command) && !props.isShell;
 
   onMount(() => {
     // Capture props eagerly so cleanup/callbacks always use the original values
@@ -223,23 +240,30 @@ export function TerminalView(props: TerminalViewProps) {
     };
     containerRef.addEventListener('paste', onContainerPaste);
 
-    // Wheel-to-scroll: Claude Code's TUI turns on mouse tracking, so by
-    // default xterm forwards wheel ticks to the app as mouse events and
-    // the terminal won't scroll up to earlier output. We take the wheel
-    // over in capture phase: in the normal buffer we scroll xterm's own
-    // scrollback by whole lines (no smoothing, nothing skipped) and stop
-    // the event so it isn't ALSO sent to claude. Ctrl+wheel (zoom) and the
-    // alternate screen (vim/less) are left to bubble untouched.
+    // Wheel-to-scroll (policy lives in lib/terminal-wheel.ts, unit-tested):
+    //  - shell (real xterm scrollback): scroll the buffer by whole lines.
+    //  - claude TUI: claude has no usable xterm scrollback but scrolls its OWN
+    //    transcript on PageUp/PageDown, so we translate each wheel notch into
+    //    those keys and write them to the PTY. claude then scrolls itself and
+    //    shows its "Jump to bottom (ctrl+End)" hint. No read-mode switch.
+    // Ctrl+wheel (zoom) and the alternate screen bubble untouched.
     const onContainerWheel = (e: WheelEvent) => {
       if (!term) return;
       const plan = planWheelScroll({
         deltaY: e.deltaY,
         deltaMode: e.deltaMode,
         altScreen: term.buffer.active.type === 'alternate',
+        claudeTui: claudeTuiTerminal,
         ctrlKey: e.ctrlKey,
         linesPerNotch: WHEEL_LINES_PER_NOTCH,
       });
-      if (!plan.hijack) return;
+      if (plan.action === 'ignore') return;
+      if (plan.action === 'ptyKeys') {
+        enqueueInput(plan.data); // PageUp/PageDown → claude scrolls its transcript
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       term.scrollLines(plan.scrollLines);
       e.preventDefault();
       e.stopPropagation();
@@ -545,6 +569,23 @@ export function TerminalView(props: TerminalViewProps) {
           // background tile must never swallow dictation meant for the
           // active one (defence-in-depth on top of the a11y gating).
           if (props.isFocused === false) {
+            taEl.value = '';
+            return;
+          }
+          // xterm's right-click copy-mirror: on right-click xterm runs
+          // `textarea.value = selectionText; textarea.select()` so the OS
+          // "Copy" works. That leaves the WHOLE value selected. Without
+          // this guard the poll forwards the user's own selection back
+          // into the PTY on every right-click ("right-click pastes my
+          // selection into the terminal"). Read selection bounds BEFORE
+          // clearing value — clearing destroys them. See selection-mirror.ts.
+          if (
+            isSelectionMirror({
+              value: taEl.value,
+              selectionStart: taEl.selectionStart,
+              selectionEnd: taEl.selectionEnd,
+            })
+          ) {
             taEl.value = '';
             return;
           }
@@ -903,30 +944,37 @@ export function TerminalView(props: TerminalViewProps) {
     const mergedArgs = commandLooksClaude ? filterArgsBySupport(rawArgs, supportedFlags) : rawArgs;
     const mergedEnv = mergeSpawnEnv(defaults, props.env);
 
-    // Belt-and-braces fallback: some Claude variants still show the interactive
-    // "Trust this folder?" Ink/blessed prompt even with the skip flag. Watch
-    // the terminal output for the pattern and auto-press Enter once we see it.
-    // Mirrors the pattern set from parallel-code's taskStatus.ts.
-    const TRUST_PATTERNS: RegExp[] = [
-      /\btrust\b.*\?/i,
-      /trust.*folder/i,
-      /confirm.*folder.*trust/i,
-    ];
-    const TRUST_EXCLUSIONS =
-      /\b(delet|remov|credential|secret|password|key|token|destro|format|drop)/i;
+    // Belt-and-braces fallback: Claude shows a blocking "Trust this folder?"
+    // prompt and IDLES until answered. On --resume (restored / branched tiles)
+    // that froze the tile — the conversation sat hidden in scrollback above an
+    // unanswered prompt ("история замирает и её не видно"), and a crash restart
+    // froze EVERY restored tile at once. We auto-press Enter on the folder-trust
+    // prompt for resumed sessions regardless of the global toggle (resuming a
+    // session means the user already worked in — and trusts — that folder). The
+    // decision (incl. the destructive-output safety exclusion) lives in the
+    // unit-tested lib/auto-trust.ts. NB: this does NOT skip per-tool permission
+    // prompts — only the folder-trust dialog.
+    const isResumeSpawn = commandLooksClaude && mergedArgs.includes('--resume');
     // eslint-disable-next-line no-control-regex
     const ANSI_STRIP = /\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]/g;
     let trustTail = '';
     let lastTrustSendAt = 0;
     function maybeAutoTrust(decoded: string) {
-      if (!store.autoTrustFolders || !commandLooksClaude) return;
+      if (!commandLooksClaude) return;
       const now = Date.now();
       if (now - lastTrustSendAt < 2500) return; // cooldown
       trustTail = (trustTail + decoded).slice(-2048);
       const plain = trustTail.replace(ANSI_STRIP, '');
-      if (TRUST_EXCLUSIONS.test(plain)) return;
-      const hit = TRUST_PATTERNS.some((rx) => rx.test(plain));
-      if (!hit) return;
+      if (
+        !shouldAutoConfirmFolderTrust({
+          text: plain,
+          commandLooksClaude,
+          isResume: isResumeSpawn,
+          autoTrustEnabled: store.autoTrustFolders,
+        })
+      ) {
+        return;
+      }
       lastTrustSendAt = now;
       trustTail = '';
       invoke(IPC.WriteToAgent, { agentId, data: '\r' }).catch(() => {
@@ -944,6 +992,14 @@ export function TerminalView(props: TerminalViewProps) {
     // it into xterm BEFORE the first PTY byte; the prePtyGate holds
     // claude's banner until the transcript landed. The claude TUI
     // itself is untouched — we only pre-seed xterm's scrollback.
+    //
+    // VARIANT A (2026-06-17): prefill into the LIVE terminal is now OFF
+    // (shouldLiveTerminalPrefill() === false) — pre-seeding the same xterm
+    // that claude repaints caused the «надлом/каша» seam on resize. The
+    // full history now lives in the read-only TranscriptView (📖 toggle),
+    // which renders the SAME JSONL without a competing live TUI. The live
+    // terminal stays clean like upstream parallel-code. See the rationale
+    // (and revert switch) in src/lib/transcript-prefill.ts.
     const resumeIdx = mergedArgs.indexOf('--resume');
     const resumeCandidate = resumeIdx >= 0 ? mergedArgs[resumeIdx + 1] : undefined;
     const resumeSessionId =
@@ -953,7 +1009,7 @@ export function TerminalView(props: TerminalViewProps) {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resumeCandidate)
         ? resumeCandidate
         : undefined;
-    if (resumeSessionId) {
+    if (resumeSessionId && shouldLiveTerminalPrefill()) {
       // Safety valve: never hold PTY output hostage if the transcript
       // IPC stalls (huge JSONL, slow disk) — open the gate after 3s.
       const gateTimer = window.setTimeout(openPrePtyGate, 3000);

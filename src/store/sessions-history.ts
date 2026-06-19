@@ -32,6 +32,12 @@ export interface SessionItem {
   folderIds: string[];
   /** Session this one was explicitly branched from (⑂), if recorded */
   branchParentId?: string;
+  /** When this row stands in for an OPEN chat tile that has no distinct
+   *  session on disk yet (a freshly-branched fork still sharing its
+   *  parent's sessionId), this is that tile's chat id. Clicking the row
+   *  focuses the tile instead of trying to --resume a non-existent
+   *  session. */
+  openChatId?: string;
 }
 
 export interface SessionPreview {
@@ -148,8 +154,30 @@ function sessionsWithOpenChats(): SessionItem[] {
   for (const c of openChats()) {
     if (!c.sessionId) continue;
     const override = titleOverrideFor(c.id);
-    if (override) renameById.set(c.sessionId, override);
     const openedAt = new Date(c.createdAt).toISOString();
+
+    // A freshly-branched tile shares its PARENT's sessionId until claude
+    // writes the fork's own JSONL (on the first turn). Keyed by sessionId
+    // it would collapse onto the parent row and the user "can't see the
+    // branch they just made". Give every still-undiverged fork its OWN
+    // row, keyed by the unique chat id and tagged so a click focuses the
+    // tile rather than --resuming a session that isn't on disk yet. Its
+    // rename override is NOT overlaid onto the parent (different row).
+    if (c.forkParent && c.sessionId === c.forkParent.sessionId) {
+      ephemeral.push({
+        sessionId: c.id,
+        filePath: '',
+        projectPath: c.cwd,
+        title: titleFor(c),
+        date: openedAt,
+        folderIds: [],
+        branchParentId: c.forkParent.sessionId,
+        openChatId: c.id,
+      });
+      continue;
+    }
+
+    if (override) renameById.set(c.sessionId, override);
     if (known.has(c.sessionId)) {
       openedAtById.set(c.sessionId, openedAt);
       continue;
@@ -163,6 +191,9 @@ function sessionsWithOpenChats(): SessionItem[] {
       // sessions — matches the "just opened" feel.
       date: openedAt,
       folderIds: [],
+      // A diverged fork whose JSONL isn't on disk yet still wants to
+      // focus its open tile on click.
+      ...(c.forkParent ? { branchParentId: c.forkParent.sessionId, openChatId: c.id } : {}),
     });
   }
 

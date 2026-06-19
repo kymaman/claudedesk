@@ -248,6 +248,45 @@ describe('bug #35 — History shows OPEN chats with a sessionId without refresh'
     expect(history.filteredSessions()[0]!.date).toBe('2099-12-31');
   });
 
+  // 🔒 ЭТАЛОН (docs/wiki/title-parity-canonical.md): the tile header title
+  // (titleFor) and the History row title for the SAME session must be equal —
+  // both in the plain disk-title case AND when the tile carries an AI-title /
+  // manual rename override. App.tsx's effect feeds the disk title into chats'
+  // _diskTitles map; we replicate that here (the effect doesn't run in this
+  // unit env) so the assertion mirrors the real render path.
+  it('PARITY: titleFor(tile) equals the History row title — disk tier AND override tier', async () => {
+    const { chats, history } = await importBoth();
+    const DISK_TITLE = 'Автономный цикл откликов на вакансии hh.ru';
+    history.setSessions([
+      {
+        sessionId: RESUMED_SESSION.sessionId,
+        filePath: '/jsonl/p.jsonl',
+        projectPath: '/tmp/proj',
+        title: DISK_TITLE,
+        date: '2026-05-28',
+        folderIds: [],
+      },
+    ]);
+    const chat = chats.openChatFromSession(RESUMED_SESSION, {
+      agentId: 'claude-opus-4-8',
+      extraFlags: [],
+      skipPermissions: false,
+    })!;
+    // Replicate App.tsx's sessions()→setDiskTitleForChat sync.
+    chats.setDiskTitleForChat(chat.id, DISK_TITLE);
+    const rowTitle = () =>
+      history.filteredSessions().find((s) => s.sessionId === RESUMED_SESSION.sessionId)!.title;
+
+    // Disk tier: tile and History both show the disk title — NO divergence.
+    expect(chats.titleFor(chat)).toBe(DISK_TITLE);
+    expect(chats.titleFor(chat)).toBe(rowTitle());
+
+    // Override tier (AI-title / manual rename): both show the override.
+    chats.renameChat(chat.id, 'миграция HH');
+    expect(chats.titleFor(chat)).toBe('миграция HH');
+    expect(chats.titleFor(chat)).toBe(rowTitle());
+  });
+
   it('a NON-renamed open chat does NOT override the fresh disk title', async () => {
     const { chats, history } = await importBoth();
     history.setSessions([

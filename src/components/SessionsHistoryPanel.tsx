@@ -55,7 +55,12 @@ import {
   resetLaunchSettings,
   type LaunchSettings,
 } from '../store/launch-settings';
-import { openChatFromSession, openChats, branchChatFromSession } from '../store/chats';
+import {
+  openChatFromSession,
+  openChats,
+  branchChatFromSession,
+  setActiveChatId,
+} from '../store/chats';
 import { sessionProjectMap } from '../store/chat-projects';
 import { ChatsGrid } from './ChatsGrid';
 import { openChatsInProject } from '../store/chats';
@@ -71,6 +76,7 @@ import { hideSession } from '../store/session-hide';
 import { invoke } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { DragMime } from '../lib/drag-mime';
+import { isCommitKey, isCancelKey } from '../lib/rename-key';
 import { SessionFamilyGraph } from './SessionFamilyGraph';
 import { loadSessionTree, familyFor } from '../store/session-tree';
 import type { TreeNode } from '../lib/session-tree-layout';
@@ -699,10 +705,11 @@ function FolderRowCustom(props: {
           onClick={(e) => e.stopPropagation()}
           onBlur={() => void commitRename()}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            // IME-safe — see lib/rename-key.ts (Russian/dictation crash).
+            if (isCommitKey(e)) {
               e.preventDefault();
               void commitRename();
-            } else if (e.key === 'Escape') {
+            } else if (isCancelKey(e)) {
               e.preventDefault();
               setEditing(false);
             }
@@ -811,6 +818,17 @@ function SessionRow(props: {
   async function handleResume(e: MouseEvent) {
     e.stopPropagation();
     if (opening()) return;
+    // Rows that stand in for an already-open tile (a freshly-branched
+    // fork still sharing its parent's session id) have no session on disk
+    // to --resume. Just focus the open tile.
+    const openChatId = props.session.openChatId;
+    if (openChatId) {
+      const tile = openChats().find((c) => c.id === openChatId && !c.closed);
+      if (tile) {
+        setActiveChatId(openChatId);
+        return;
+      }
+    }
     setOpening(true);
     try {
       // If this session is assigned to a project (sessionProjectMap),
@@ -844,19 +862,30 @@ function SessionRow(props: {
   }
 
   async function commitEdit() {
+    // Dedupe the onBlur that fires when Enter unmounts the input.
+    if (!editing()) return;
     const value = draft().trim();
     setEditing(false);
-    if (value !== props.session.title) {
-      await renameSessionLocal(props.session.sessionId, value);
+    // Synthetic branch rows have no session on disk — nothing to alias.
+    if (props.session.openChatId) return;
+    try {
+      if (value !== props.session.title) {
+        await renameSessionLocal(props.session.sessionId, value);
+      }
+    } catch (err) {
+      console.error('[SessionRow] rename failed:', err);
     }
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+    // IME-safe: while composing (Russian / dictation), Enter belongs to
+    // the input method — committing here unmounts the input mid-
+    // composition and crashes the renderer. See lib/rename-key.ts.
+    if (isCommitKey(e)) {
       e.preventDefault();
       void commitEdit();
-    }
-    if (e.key === 'Escape') {
+    } else if (isCancelKey(e)) {
+      e.preventDefault();
       setEditing(false);
     }
   }

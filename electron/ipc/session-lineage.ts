@@ -345,12 +345,21 @@ async function fileContainsUuid(filePath: string, uuid: string): Promise<boolean
  * spawning the PTY, when claude may not have minted the file yet.
  * waitMs = 0 is a single scan — used as a last-moment check at branch
  * time.
+ *
+ * excludeSessionIds: continuation ids already claimed by OTHER tiles.
+ * When you branch a session, the parent's own continuation AND the fork
+ * both copy the parent's last-message uuid, so both files match the
+ * anchor. Without exclusion every caller gets the SAME newest match and
+ * the two tiles glue onto one live session ("одна и та же переписка в
+ * двух окнах"). Excluding ids a sibling already adopted lets each tile
+ * land on its OWN distinct continuation.
  */
 export async function resolveLiveSessionId(opts: {
   sessionId: string;
   sinceMs: number;
   waitMs?: number;
   projectsDir?: string;
+  excludeSessionIds?: string[];
 }): Promise<{ sessionId: string; changed: boolean }> {
   const root = opts.projectsDir ?? getClaudeProjectsDir();
   const original = findSessionFileIn(root, opts.sessionId);
@@ -358,6 +367,7 @@ export async function resolveLiveSessionId(opts: {
   const anchor = lastUuidOf(original);
   if (!anchor) return { sessionId: opts.sessionId, changed: false };
   const dir = path.dirname(original);
+  const excluded = new Set(opts.excludeSessionIds ?? []);
 
   const deadline = Date.now() + Math.max(0, opts.waitMs ?? 0);
   // Candidates already vetted (sessionId -> contains anchor?) so polls
@@ -377,7 +387,7 @@ export async function resolveLiveSessionId(opts: {
     const candidates: Array<{ id: string; f: string; mtime: number }> = [];
     for (const name of names) {
       const id = name.replace(/\.jsonl$/i, '');
-      if (id === opts.sessionId || !UUID_RE.test(id)) continue;
+      if (id === opts.sessionId || excluded.has(id) || !UUID_RE.test(id)) continue;
       const f = path.join(dir, name);
       let st: fs.Stats;
       try {

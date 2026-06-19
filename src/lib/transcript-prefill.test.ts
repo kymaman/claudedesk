@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { shouldWriteTranscript } from './transcript-prefill.js';
+import { shouldWriteTranscript, shouldLiveTerminalPrefill } from './transcript-prefill.js';
 
 describe('shouldWriteTranscript', () => {
   it('writes a non-empty transcript when the term is alive', () => {
@@ -31,5 +31,16 @@ describe('shouldWriteTranscript', () => {
     expect(shouldWriteTranscript({ transcript: '', termAlive: true })).toBe(false);
     expect(shouldWriteTranscript({ transcript: null, termAlive: true })).toBe(false);
     expect(shouldWriteTranscript({ transcript: undefined, termAlive: true })).toBe(false);
+  });
+});
+
+describe('shouldLiveTerminalPrefill (variant A)', () => {
+  it('is OFF — the live terminal must NOT pre-seed session history', () => {
+    // Variant A: the live xterm stays clean (pure PTY, like upstream
+    // parallel-code). Mixing a static JSONL render with claude's live TUI
+    // repaints produced the «надлом/каша» seam on resize. History now lives
+    // in the read-only TranscriptView (📖). This is the regression guard
+    // against silently flip-flopping prefill back on a THIRD time.
+    expect(shouldLiveTerminalPrefill()).toBe(false);
   });
 });

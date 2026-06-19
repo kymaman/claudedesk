@@ -30,7 +30,14 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { launchApp, closeAllChats } from './helpers.js';
+import { launchApp, closeAllChats, openReadMode } from './helpers.js';
+
+// Variant A (2026-06-17): scrollback history lives in the read-only
+// TranscriptView (📖), not the live terminal. Test 1 (no-infinite-loading)
+// still checks the LIVE tile renders fast; tests 2 & 3 (scrollback content
+// + wheel) check the READ pane, where the history now is.
+const LIVE_XTERM = '.chat-tile .xterm';
+const READ_XTERM = '.chat-tile__read-pane .xterm';
 
 let app: ElectronApplication;
 let win: Page;
@@ -67,36 +74,42 @@ interface XtermInternals {
   };
 }
 
-async function tileHasContent(tileIndex: number): Promise<boolean> {
-  return await win.evaluate((idx) => {
-    const tiles = Array.from(document.querySelectorAll('.chat-tile .xterm')) as HTMLElement[];
-    if (idx >= tiles.length) return false;
-    const t = (tiles[idx] as unknown as XtermInternals).__term;
-    if (!t) return false;
-    const buf = t.buffer.active;
-    for (let i = 0; i < buf.length; i++) {
-      const ln = buf.getLine(i);
-      if (ln && ln.translateToString(true).trim().length > 0) return true;
-    }
-    return false;
-  }, tileIndex);
+async function tileHasContent(tileIndex: number, selector: string = LIVE_XTERM): Promise<boolean> {
+  return await win.evaluate(
+    ({ idx, sel }) => {
+      const tiles = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
+      if (idx >= tiles.length) return false;
+      const t = (tiles[idx] as unknown as XtermInternals).__term;
+      if (!t) return false;
+      const buf = t.buffer.active;
+      for (let i = 0; i < buf.length; i++) {
+        const ln = buf.getLine(i);
+        if (ln && ln.translateToString(true).trim().length > 0) return true;
+      }
+      return false;
+    },
+    { idx: tileIndex, sel: selector },
+  );
 }
 
-async function tileStats(tileIndex: number) {
-  return await win.evaluate((idx) => {
-    const tiles = Array.from(document.querySelectorAll('.chat-tile .xterm')) as HTMLElement[];
-    if (idx >= tiles.length) return null;
-    const t = (tiles[idx] as unknown as XtermInternals).__term;
-    if (!t) return null;
-    const buf = t.buffer.active;
-    return {
-      length: buf.length,
-      viewportY: buf.viewportY,
-      baseY: buf.baseY,
-      rows: t.rows,
-      cols: t.cols,
-    };
-  }, tileIndex);
+async function tileStats(tileIndex: number, selector: string = LIVE_XTERM) {
+  return await win.evaluate(
+    ({ idx, sel }) => {
+      const tiles = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
+      if (idx >= tiles.length) return null;
+      const t = (tiles[idx] as unknown as XtermInternals).__term;
+      if (!t) return null;
+      const buf = t.buffer.active;
+      return {
+        length: buf.length,
+        viewportY: buf.viewportY,
+        baseY: buf.baseY,
+        rows: t.rows,
+        cols: t.cols,
+      };
+    },
+    { idx: tileIndex, sel: selector },
+  );
 }
 
 async function openSession(rowIndex: number): Promise<void> {
@@ -110,10 +123,11 @@ async function openSession(rowIndex: number): Promise<void> {
 async function waitForTileContent(
   tileIndex: number,
   timeoutMs: number,
+  selector: string = LIVE_XTERM,
 ): Promise<{ rendered: boolean; tookMs: number }> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (await tileHasContent(tileIndex)) {
+    if (await tileHasContent(tileIndex, selector)) {
       return { rendered: true, tookMs: Date.now() - start };
     }
     await win.waitForTimeout(150);
@@ -155,11 +169,14 @@ test('resumed chat must have scrollback content (buffer.length > rows)', async (
   let found = false;
   for (let i = 0; i < Math.min(total, 5); i++) {
     await openSession(i);
-    await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 8_000 });
-    await waitForTileContent(0, 6_000);
-    // Give transcript its window to land.
+    await expect(win.locator(LIVE_XTERM).first()).toBeVisible({ timeout: 8_000 });
+    // Variant A: scrollback content lives in the read pane (📖), not the
+    // live terminal. Open read mode and measure THERE.
+    await openReadMode(win).catch(() => undefined);
+    await waitForTileContent(0, 8_000, READ_XTERM);
+    // Give the transcript its window to fully land.
     await win.waitForTimeout(3_000);
-    const stats = await tileStats(0);
+    const stats = await tileStats(0, READ_XTERM);
     await info.attach(`session-${i}-stats.txt`, {
       body: Buffer.from(JSON.stringify(stats, null, 2), 'utf8'),
       contentType: 'text/plain',
@@ -174,7 +191,7 @@ test('resumed chat must have scrollback content (buffer.length > rows)', async (
   }
   expect(
     found,
-    'At least one tested session must have scrollback content (buffer.length > rows + 10).',
+    'At least one tested session must have read-mode scrollback content (buffer.length > rows + 10).',
   ).toBe(true);
 });
 
@@ -186,14 +203,17 @@ test('wheel events must scroll viewport when scrollback exists', async ({}, info
   if (total === 0) test.skip(true, 'No sessions to test');
 
   // Find a session with substantial scrollback to test wheel scroll on.
+  // Variant A: that scrollback is in the read pane (📖), so open read mode
+  // and measure/scroll there.
   let candidate = -1;
   let firstStats = null;
   for (let i = 0; i < Math.min(total, 5); i++) {
     await openSession(i);
-    await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 8_000 });
-    await waitForTileContent(0, 6_000);
+    await expect(win.locator(LIVE_XTERM).first()).toBeVisible({ timeout: 8_000 });
+    await openReadMode(win).catch(() => undefined);
+    await waitForTileContent(0, 8_000, READ_XTERM);
     await win.waitForTimeout(3_000);
-    const stats = await tileStats(0);
+    const stats = await tileStats(0, READ_XTERM);
     if (stats && stats.length > stats.rows + 200) {
       candidate = i;
       firstStats = stats;
@@ -202,9 +222,9 @@ test('wheel events must scroll viewport when scrollback exists', async ({}, info
     await closeAllChats(win);
     await win.waitForTimeout(300);
   }
-  if (candidate < 0) test.skip(true, 'No session with enough scrollback for wheel test');
+  if (candidate < 0) test.skip(true, 'No session with enough read-mode scrollback for wheel test');
 
-  const xterm = win.locator('.chat-tile .xterm').first();
+  const xterm = win.locator(READ_XTERM).first();
   const box = await xterm.boundingBox();
   expect(box).not.toBeNull();
   await win.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
@@ -214,7 +234,7 @@ test('wheel events must scroll viewport when scrollback exists', async ({}, info
   }
   await win.waitForTimeout(500);
 
-  const after = await tileStats(0);
+  const after = await tileStats(0, READ_XTERM);
   await info.attach('wheel-stats.txt', {
     body: Buffer.from(
       `before: ${JSON.stringify(firstStats)}\nafter:  ${JSON.stringify(after)}`,

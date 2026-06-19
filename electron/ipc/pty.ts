@@ -30,6 +30,13 @@ interface PtySession {
   scrollback: RingBuffer;
   /** Assigned container name when running in Docker mode, null otherwise. */
   containerName: string | null;
+  /** Set true the moment the underlying process exits. Native node-pty
+   *  calls (resize/write) against an exited ConPTY can corrupt the heap and
+   *  crash the whole main process (Windows c0000374) — which is NOT
+   *  catchable in JS. We must SKIP the native call, not try/catch it. The
+   *  coalesced resize burst on a grid reflow (e.g. branching a chat) is the
+   *  classic way a late resize reaches a just-exited PTY. */
+  exited: boolean;
 }
 
 const sessions = new Map<string, PtySession>();
@@ -134,6 +141,9 @@ export function spawnAgent(
   if (existing) {
     if (existing.flushTimer) clearTimeout(existing.flushTimer);
     existing.subscribers.clear();
+    // Tearing down a ConPTY: open the guard window so a resize doesn't race
+    // the teardown (the same heap-corruption class as spawn-vs-resize).
+    markLifecycle();
     existing.proc.kill();
     sessions.delete(args.agentId);
   }
@@ -252,8 +262,12 @@ export function spawnAgent(
     subscribers: new Set(),
     scrollback: new RingBuffer(),
     containerName,
+    exited: false,
   };
   sessions.set(args.agentId, session);
+  // A ConPTY connect just started on a background thread — open the guard
+  // window so the grid-reflow resize storm defers instead of racing it.
+  markLifecycle();
 
   // Batching strategy matching the Rust implementation
   let batchChunks: Buffer[] = [];
@@ -333,6 +347,11 @@ export function spawnAgent(
   });
 
   proc.onExit(({ exitCode, signal }) => {
+    // Mark exited FIRST (before any early return) so resize/write guards stop
+    // touching the dead native handle — even for a session that was already
+    // replaced by a newer spawn under the same agentId.
+    session.exited = true;
+
     // If this session was replaced by a new spawn with the same agentId,
     // skip cleanup — the new session owns the map entry now.
     if (sessions.get(args.agentId) !== session) return;
@@ -371,16 +390,153 @@ export function spawnAgent(
   emitPtyEvent('spawn', args.agentId);
 }
 
+// --- Mass-spawn de-confliction (startup / project-open crash fix) ---
+//
+// When many tiles restore at once (app launch) or a project with many chats
+// opens, every TerminalView mounts in the same tick and fires SpawnAgent in
+// parallel. N concurrent ConPTY connects into conpty.node from N background
+// threads is the SAME Windows heap-corruption race as a branch — a crash dump
+// from a launch crash showed 17 threads inside conpty.node at once
+// (c0000374). We serialise the native spawn: one ConPTY connect at a time with
+// a small gap, so conpty.node is never initialising several pseudo-consoles
+// concurrently. `spawnAgent` itself stays synchronous (its unit tests call it
+// directly); the IPC handler awaits this queue instead.
+let spawnChain: Promise<void> = Promise.resolve();
+let spawnStaggerMs = IS_WINDOWS ? 90 : 0;
+
+/** TEST-ONLY: override the inter-spawn gap so unit tests can assert the
+ *  serialisation/stagger deterministically without a real OS delay. */
+export function __setSpawnStaggerMsForTests(ms: number): void {
+  spawnStaggerMs = ms;
+}
+
+/** Serialised spawn: chains onto the previous spawn so ConPTY connects never
+ *  overlap, then waits `spawnStaggerMs` before the next one starts. Rejections
+ *  are isolated (a bad command must not wedge later spawns) but still surface
+ *  to THIS caller's awaited promise. */
+export function spawnAgentSerialized(
+  win: BrowserWindow,
+  args: Parameters<typeof spawnAgent>[1],
+): Promise<void> {
+  const run = spawnChain.then(() => {
+    spawnAgent(win, args);
+  });
+  const gap = (): Promise<void> => new Promise((r) => setTimeout(r, spawnStaggerMs));
+  spawnChain = run.then(gap, gap);
+  return run;
+}
+
 export function writeToAgent(agentId: string, data: string): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
+  // Writing to an exited PTY touches a freed native handle — skip silently
+  // (the tile is on its way out; the bytes have nowhere to go).
+  if (session.exited) return;
   session.proc.write(data);
+}
+
+/** Clamp a proposed terminal dimension to a sane positive integer. node-pty's
+ *  native resize is unforgiving: 0, NaN, fractional, or absurdly large values
+ *  can corrupt the ConPTY heap (an uncatchable c0000374 that kills the whole
+ *  main process). xterm normally reports ≥1, but a 0×0 layout snapshot during
+ *  a grid reflow can leak a 0 through — so we sanitise at the boundary. */
+function sanitizeDim(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  const n = Math.floor(value);
+  if (n < 1) return null;
+  // 4000 cols/rows is far beyond any real terminal; treat larger as bogus.
+  return Math.min(n, 4000);
+}
+
+// --- ConPTY lifecycle / resize de-confliction (Windows heap-corruption fix) ---
+//
+// A crash dump (c0000374, NONCONTINUABLE) proved the corruption is inside
+// conpty.node: the faulting thread sat 61 frames deep in node-pty's ConPTY
+// code while a *branch* spawned a fresh PTY. Branching inserts a tile mid-grid,
+// so the new `pty.spawn` (a ConPTY connect that runs on a background thread)
+// fires at the same instant the grid reflow resizes every sibling PTY. Those
+// concurrent entries into conpty.node from different threads race in the
+// pseudo-console allocator and corrupt the heap — an uncatchable native crash
+// that kills the whole main process.
+//
+// We can't serialise conpty.node's own internal threads, but we CAN stop
+// ISSUING a resize storm while a spawn/kill is still settling. After each
+// lifecycle op we open a short guard window; resizes that arrive inside it are
+// deferred and coalesced (latest dims per agent win), then drained one at a
+// time with a small gap so they never re-enter conpty.node in a single burst.
+// Outside the window resize stays fully synchronous — so non-Windows and the
+// steady state are unchanged.
+let lastLifecycleAt = -Infinity;
+// Guard window after a spawn/kill during which sibling resizes are deferred.
+// 0 on non-Windows: only ConPTY has the race; POSIX ptys resize safely.
+let lifecycleGuardMs = IS_WINDOWS ? 150 : 0;
+
+/** TEST-ONLY: override the post-lifecycle resize guard window so unit tests
+ *  can assert both the immediate (window=0) and deferred (window>0) paths
+ *  deterministically, regardless of host OS. */
+export function __setLifecycleGuardMsForTests(ms: number): void {
+  lifecycleGuardMs = ms;
+}
+// Gap between drained native resizes, so a coalesced burst trickles into
+// conpty.node instead of hitting it all in one tick.
+const RESIZE_STAGGER_MS = 8;
+const deferredResize = new Map<string, { cols: number; rows: number }>();
+let resizeDrainTimer: ReturnType<typeof setTimeout> | null = null;
+
+function markLifecycle(): void {
+  lastLifecycleAt = Date.now();
+}
+
+/** Apply the latest deferred resize for one agent, then reschedule for the
+ *  rest of the queue — staggered so conpty.node sees one resize at a time. */
+function drainDeferredResizes(): void {
+  resizeDrainTimer = null;
+  const next = deferredResize.entries().next();
+  if (next.done) return;
+  const [agentId, dims] = next.value;
+  deferredResize.delete(agentId);
+  const session = sessions.get(agentId);
+  if (session && !session.exited) {
+    try {
+      session.proc.resize(dims.cols, dims.rows);
+    } catch (err) {
+      console.warn(`[pty] deferred resize(${dims.cols}, ${dims.rows}) failed for ${agentId}:`, err);
+    }
+  }
+  if (deferredResize.size > 0) {
+    resizeDrainTimer = setTimeout(drainDeferredResizes, RESIZE_STAGGER_MS);
+  }
 }
 
 export function resizeAgent(agentId: string, cols: number, rows: number): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
-  session.proc.resize(cols, rows);
+  // Never resize a PTY whose process has exited: the native handle is gone
+  // and resizing it can corrupt the heap (uncatchable native crash).
+  if (session.exited) return;
+  const c = sanitizeDim(cols);
+  const r = sanitizeDim(rows);
+  if (c === null || r === null) return; // drop a bogus (e.g. 0×0) snapshot
+
+  // Inside the post-lifecycle guard window (a branch grid reflow is the
+  // canonical case): defer + coalesce so we don't fire native resizes into
+  // conpty.node while a fresh PTY is mid-connect on a background thread.
+  if (Date.now() - lastLifecycleAt < lifecycleGuardMs) {
+    deferredResize.set(agentId, { cols: c, rows: r });
+    if (resizeDrainTimer === null) {
+      resizeDrainTimer = setTimeout(drainDeferredResizes, lifecycleGuardMs);
+    }
+    return;
+  }
+
+  // Defensive try/catch catches node-pty's OWN guard throws (e.g. "cannot
+  // resize a closed pty"); it does NOT catch native heap corruption — the
+  // exited/dim guards above are what prevent that.
+  try {
+    session.proc.resize(c, r);
+  } catch (err) {
+    console.warn(`[pty] resize(${c}, ${r}) failed for ${agentId}:`, err);
+  }
 }
 
 export function pauseAgent(agentId: string): void {
@@ -412,6 +568,9 @@ export function killAgent(agentId: string): void {
     if (session.containerName) {
       stopDockerContainer(session.containerName);
     }
+    // Opening the guard window before tearing the ConPTY down keeps a
+    // concurrent grid-reflow resize from racing conpty.node's teardown.
+    markLifecycle();
     session.proc.kill();
   }
 }

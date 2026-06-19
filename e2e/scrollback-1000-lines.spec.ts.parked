@@ -22,7 +22,17 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { launchApp, closeAllChats, awaitChatReady } from './helpers.js';
+import { launchApp, closeAllChats, awaitChatReady, openReadMode } from './helpers.js';
+
+/**
+ * VARIANT A (2026-06-17): the «scroll up ≥1000 lines of history» guarantee
+ * moved from the live terminal to the read-only TranscriptView (📖). The
+ * live terminal no longer pre-seeds history (it stays clean like upstream
+ * parallel-code), so this spec resumes a session, opens read mode, and
+ * scrolls the READ pane — which renders the same JSONL the live terminal
+ * used to. Same user guarantee, new (clean) home.
+ */
+const READ_XTERM = '.chat-tile__read-pane .xterm';
 
 let app: ElectronApplication;
 let win: Page;
@@ -72,8 +82,8 @@ interface Snapshot {
 async function snapshot(): Promise<Snapshot> {
   const deadline = Date.now() + 4_000;
   while (Date.now() < deadline) {
-    const r = await win.evaluate(() => {
-      const el = document.querySelector('.chat-tile .xterm') as HTMLElement | null;
+    const r = await win.evaluate((sel) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
       if (!el) return { state: 'no-xterm' as const };
       const t = (el as unknown as XtermInternals).__term;
       if (!t) return { state: 'no-term' as const };
@@ -92,11 +102,11 @@ async function snapshot(): Promise<Snapshot> {
         length: buf.length,
         rows: t.rows,
       };
-    });
+    }, READ_XTERM);
     if (r.state === 'ok') return r;
     await win.waitForTimeout(150);
   }
-  throw new Error('xterm __term never appeared');
+  throw new Error('read-pane xterm __term never appeared');
 }
 
 interface Result {
@@ -127,10 +137,14 @@ async function trySession(
   await expect(resume).toBeVisible({ timeout: 5_000 });
   await resume.click();
 
-  const xterm = win.locator('.chat-tile .xterm').first();
-  await expect(xterm).toBeVisible({ timeout: 15_000 });
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 15_000 });
   await awaitChatReady(win, 12_000).catch(() => undefined);
-  // Let claude finish printing --resume history into PTY.
+  // Variant A: history lives in read mode, not the live terminal. Open
+  // the 📖 read pane and scroll THAT — it renders the same JSONL.
+  const xterm = win.locator(READ_XTERM).first();
+  await openReadMode(win).catch(() => undefined);
+  await expect(xterm).toBeVisible({ timeout: 15_000 });
+  // Let the transcript fully land in the read pane.
   await win.waitForTimeout(2_500);
 
   const before = await snapshot();
@@ -175,15 +189,15 @@ async function trySession(
   await win.waitForTimeout(400);
 
   // Now try the API-level scroll too — measures the buffer ceiling.
-  await win.evaluate(() => {
-    const el = document.querySelector('.chat-tile .xterm') as HTMLElement | null;
+  await win.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement | null;
     const t = (el as unknown as XtermInternals).__term;
     if (!t) return;
     interface ScrollAPI {
       scrollLines: (n: number) => void;
     }
     (t as unknown as ScrollAPI).scrollLines(-1100);
-  });
+  }, READ_XTERM);
   await win.waitForTimeout(400);
 
   const after = await snapshot();

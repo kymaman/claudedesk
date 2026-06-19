@@ -78,15 +78,21 @@ vi.mock('node-pty', () => ({
 }));
 
 import {
+  __setLifecycleGuardMsForTests,
+  __setSpawnStaggerMsForTests,
   buildDockerImage,
   DOCKER_CONTAINER_HOME,
   dockerImageExists,
   hashDockerfile,
+  killAgent,
   killAllAgents,
   projectImageTag,
+  resizeAgent,
   resolveProjectDockerfile,
   spawnAgent,
+  spawnAgentSerialized,
   validateCommand,
+  writeToAgent,
 } from './pty.js';
 
 let tempPaths: string[] = [];
@@ -240,6 +246,211 @@ describe('spawnAgent docker mode', () => {
     expect(volumeFlags).toContain(`${home}/.ssh:${DOCKER_CONTAINER_HOME}/.ssh:ro`);
     expect(volumeFlags).toContain(`${home}/.gitconfig:${DOCKER_CONTAINER_HOME}/.gitconfig:ro`);
     expect(volumeFlags).toContain(`${home}/.config/gh:${DOCKER_CONTAINER_HOME}/.config/gh:ro`);
+  });
+});
+
+/** Spawn a non-docker agent and return its id + the mock pty proc. */
+function spawnLocalAgent(): { agentId: string; proc: ReturnType<typeof mockPtySpawn> } {
+  const agentId = nextAgentId();
+  spawnAgent(createMockWindow(), buildSpawnArgs({ agentId, dockerMode: false }));
+  const results = mockPtySpawn.mock.results;
+  const last = results[results.length - 1];
+  expect(last).toBeTruthy();
+  const proc = (last as { value: ReturnType<typeof mockPtySpawn> }).value;
+  return { agentId, proc };
+}
+
+describe('resize/write native-call guards (heap-corruption hardening)', () => {
+  // Close the post-lifecycle guard window so these assert the IMMEDIATE
+  // resize path deterministically on any host OS (Windows defaults to 150ms).
+  beforeEach(() => __setLifecycleGuardMsForTests(0));
+
+  const spawnLocal = spawnLocalAgent;
+
+  it('does NOT resize a PTY after its process has exited', () => {
+    const { agentId, proc } = spawnLocal();
+    proc.emitExit({ exitCode: 0, signal: undefined });
+    // Session is deleted on exit, so resize throws "not found" — the point is
+    // the native resize is never called on a dead handle.
+    expect(() => resizeAgent(agentId, 100, 40)).toThrow(/not found/i);
+    expect(proc.resize).not.toHaveBeenCalled();
+  });
+
+  it('drops a bogus 0×0 resize snapshot instead of forwarding it', () => {
+    const { agentId, proc } = spawnLocal();
+    resizeAgent(agentId, 0, 0);
+    resizeAgent(agentId, 0, 40);
+    resizeAgent(agentId, 120, 0);
+    expect(proc.resize).not.toHaveBeenCalled();
+  });
+
+  it('drops non-finite / negative dims', () => {
+    const { agentId, proc } = spawnLocal();
+    resizeAgent(agentId, Number.NaN, 40);
+    resizeAgent(agentId, -5, 40);
+    resizeAgent(agentId, 120, Infinity);
+    expect(proc.resize).not.toHaveBeenCalled();
+  });
+
+  it('forwards a valid resize, flooring fractional dims', () => {
+    const { agentId, proc } = spawnLocal();
+    resizeAgent(agentId, 120.9, 40.2);
+    expect(proc.resize).toHaveBeenCalledWith(120, 40);
+  });
+
+  it('clamps absurdly large dims to a sane ceiling', () => {
+    const { agentId, proc } = spawnLocal();
+    resizeAgent(agentId, 99999, 40);
+    expect(proc.resize).toHaveBeenCalledWith(4000, 40);
+  });
+
+  it('does NOT write to a PTY after exit (no throw, just a no-op)', () => {
+    const { agentId, proc } = spawnLocal();
+    // Re-fetch via map indirectly: writeToAgent on a live session writes.
+    writeToAgent(agentId, 'hello');
+    expect(proc.write).toHaveBeenCalledTimes(1);
+    proc.emitExit({ exitCode: 0, signal: undefined });
+    // After exit the session is gone → writeToAgent throws not-found rather
+    // than touching the freed handle.
+    expect(() => writeToAgent(agentId, 'world')).toThrow(/not found/i);
+    expect(proc.write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('branch resize-storm de-confliction (ConPTY heap-corruption fix)', () => {
+  // A crash dump (c0000374) proved a *branch* corrupts the ConPTY heap: the
+  // new tile's `pty.spawn` (a ConPTY connect on a background thread) races the
+  // grid-reflow resize storm firing into conpty.node from other threads. The
+  // fix opens a guard window after every spawn/kill during which sibling
+  // resizes are DEFERRED + coalesced, then drained one at a time — so they
+  // never re-enter conpty.node alongside a spawn/teardown. These tests assert
+  // exactly that scheduling. Use a small, explicit window for determinism.
+  beforeEach(() => __setLifecycleGuardMsForTests(60));
+  afterEach(async () => {
+    // Drain any staggered timers, then restore the default so later describes
+    // are untouched.
+    await new Promise((r) => setTimeout(r, 200));
+    __setLifecycleGuardMsForTests(0);
+  });
+
+  it('defers a sibling resize fired during the post-spawn guard window', async () => {
+    const sib = spawnLocalAgent(); // alive before the branch
+    sib.proc.resize.mockClear();
+    spawnLocalAgent(); // the branch spawn → opens the guard window
+    // The reflow resizes the sibling — must NOT touch conpty.node yet.
+    resizeAgent(sib.agentId, 100, 30);
+    expect(sib.proc.resize).not.toHaveBeenCalled();
+    // After the window the deferred resize drains through.
+    await new Promise((r) => setTimeout(r, 130));
+    expect(sib.proc.resize).toHaveBeenCalledWith(100, 30);
+  });
+
+  it('coalesces to the LATEST dims per agent while deferred', async () => {
+    const sib = spawnLocalAgent();
+    sib.proc.resize.mockClear();
+    spawnLocalAgent(); // open window
+    resizeAgent(sib.agentId, 80, 24);
+    resizeAgent(sib.agentId, 100, 30);
+    resizeAgent(sib.agentId, 120, 40); // latest wins
+    expect(sib.proc.resize).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 130));
+    expect(sib.proc.resize).toHaveBeenCalledTimes(1);
+    expect(sib.proc.resize).toHaveBeenCalledWith(120, 40);
+  });
+
+  it('drains multiple agents (not all in one synchronous burst)', async () => {
+    const a = spawnLocalAgent();
+    const b = spawnLocalAgent();
+    a.proc.resize.mockClear();
+    b.proc.resize.mockClear();
+    spawnLocalAgent(); // freshest spawn → open window
+    resizeAgent(a.agentId, 100, 30);
+    resizeAgent(b.agentId, 110, 35);
+    expect(a.proc.resize).not.toHaveBeenCalled();
+    expect(b.proc.resize).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 220));
+    expect(a.proc.resize).toHaveBeenCalledWith(100, 30);
+    expect(b.proc.resize).toHaveBeenCalledWith(110, 35);
+  });
+
+  it('kill also opens the guard window (resize deferred during teardown)', async () => {
+    const sib = spawnLocalAgent();
+    const victim = spawnLocalAgent();
+    sib.proc.resize.mockClear();
+    killAgent(victim.agentId); // ConPTY teardown → opens window
+    resizeAgent(sib.agentId, 90, 28);
+    expect(sib.proc.resize).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 130));
+    expect(sib.proc.resize).toHaveBeenCalledWith(90, 28);
+  });
+
+  it('still drops a bogus 0×0 snapshot even inside the guard window', async () => {
+    const sib = spawnLocalAgent();
+    sib.proc.resize.mockClear();
+    spawnLocalAgent(); // open window
+    resizeAgent(sib.agentId, 0, 0);
+    await new Promise((r) => setTimeout(r, 130));
+    expect(sib.proc.resize).not.toHaveBeenCalled();
+  });
+
+  it('never resizes a sibling that exited before the deferred drain ran', async () => {
+    const sib = spawnLocalAgent();
+    sib.proc.resize.mockClear();
+    spawnLocalAgent(); // open window
+    resizeAgent(sib.agentId, 100, 30); // deferred
+    sib.proc.emitExit({ exitCode: 0, signal: undefined }); // sibling dies first
+    await new Promise((r) => setTimeout(r, 130));
+    expect(sib.proc.resize).not.toHaveBeenCalled();
+  });
+});
+
+describe('spawnAgentSerialized (mass-restore startup crash fix)', () => {
+  // Restoring many tiles at once must NOT fire N concurrent ConPTY connects.
+  // The serialiser runs one native spawn at a time with a gap between.
+  beforeEach(() => __setSpawnStaggerMsForTests(50));
+  afterEach(() => __setSpawnStaggerMsForTests(0));
+
+  it('runs spawns one at a time: the second waits for the first + the gap', async () => {
+    const before = mockPtySpawn.mock.calls.length;
+    // Fire two in the SAME tick, as a mass restore does — both must defer.
+    const pA = spawnAgentSerialized(
+      createMockWindow(),
+      buildSpawnArgs({ agentId: nextAgentId(), dockerMode: false }),
+    );
+    const pB = spawnAgentSerialized(
+      createMockWindow(),
+      buildSpawnArgs({ agentId: nextAgentId(), dockerMode: false }),
+    );
+    // Neither native spawn has run yet (both queued onto the microtask chain).
+    expect(mockPtySpawn.mock.calls.length).toBe(before);
+
+    await pA;
+    // First has spawned; the second is still serving out the stagger gap.
+    expect(mockPtySpawn.mock.calls.length).toBe(before + 1);
+
+    await pB;
+    expect(mockPtySpawn.mock.calls.length).toBe(before + 2);
+  });
+
+  it('a failing spawn does not wedge later spawns in the queue', async () => {
+    const before = mockPtySpawn.mock.calls.length;
+    // Unresolvable command → validateCommand throws inside spawnAgent → this
+    // promise rejects, but the chain must keep flowing for the next spawn.
+    const bad = spawnAgentSerialized(
+      createMockWindow(),
+      buildSpawnArgs({
+        agentId: nextAgentId(),
+        command: 'nonexistent-binary-xyz',
+        dockerMode: false,
+      }),
+    );
+    await expect(bad).rejects.toBeTruthy();
+    const good = spawnAgentSerialized(
+      createMockWindow(),
+      buildSpawnArgs({ agentId: nextAgentId(), dockerMode: false }),
+    );
+    await good;
+    expect(mockPtySpawn.mock.calls.length).toBe(before + 1);
   });
 });
 

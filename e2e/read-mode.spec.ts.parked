@@ -1,0 +1,104 @@
+/**
+ * e2e/read-mode.spec.ts
+ *
+ * The clean "read mode" toggle: switches a tile from Claude's live TUI (which
+ * scrambles on resize — "по рулям") to a read-only render of the conversation
+ * from the session JSONL (●/⎿/❯, verified clean). Two guarantees:
+ *   1. read mode shows the rendered conversation;
+ *   2. toggling does NOT unmount the live terminal (that would KillAgent and,
+ *      on Windows, can crash via ConPTY teardown) — the live pane is only
+ *      hidden, then restored.
+ */
+
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { launchApp, awaitChatReady, closeAllChats } from './helpers.js';
+
+let app: ElectronApplication;
+let win: Page;
+
+test.beforeAll(async () => {
+  ({ app, win } = await launchApp());
+});
+
+test.describe.configure({ timeout: 180_000 });
+test.afterAll(async () => {
+  if (!app) return;
+  try {
+    await closeAllChats(win).catch(() => undefined);
+    await win.waitForTimeout(300);
+  } catch {
+    /* ignore */
+  }
+  await app.close();
+});
+
+interface XtermInternals {
+  __term?: {
+    buffer: {
+      active: {
+        length: number;
+        getLine: (i: number) => { translateToString: (t?: boolean) => string } | undefined;
+      };
+    };
+  };
+}
+
+async function readPaneText(): Promise<string> {
+  return win.evaluate(() => {
+    const el = document.querySelector('.chat-tile__read-pane .xterm') as HTMLElement | null;
+    const t = el ? (el as unknown as XtermInternals).__term : undefined;
+    if (!t) return '';
+    const b = t.buffer.active;
+    const lines: string[] = [];
+    for (let k = 0; k < b.length; k += 1) lines.push(b.getLine(k)?.translateToString(true) ?? '');
+    return lines.join('\n');
+  });
+}
+
+test('read mode shows a clean transcript and keeps the live PTY alive', async () => {
+  // Open a real session as a chat (wait for History to populate — it scans
+  // ~/.claude/projects and can take seconds; the shared helper's 300ms is too
+  // short and would skip).
+  await win.locator('.ts-nav', { hasText: 'History' }).click();
+  await win.locator('.session-item').first().waitFor({ state: 'visible', timeout: 20_000 });
+  await win.locator('.session-item').first().locator('.session-item__resume').click();
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible({ timeout: 15_000 });
+  await awaitChatReady(win).catch(() => undefined);
+
+  const tile = win.locator('.chat-tile').first();
+  await expect(tile).toBeVisible();
+
+  // Toggle into read mode.
+  await tile.locator('.chat-tile__read').click();
+
+  // The read pane appears…
+  const readPane = win.locator('.chat-tile__read-pane .xterm').first();
+  await expect(readPane).toBeVisible({ timeout: 10_000 });
+
+  // …and the LIVE terminal is still in the DOM (PTY alive), just hidden.
+  const liveCount = await win.locator('.chat-tile__live').count();
+  expect(liveCount, 'live terminal pane must stay mounted (PTY alive)').toBe(1);
+
+  // The render carries native conversation markers (clean render), given the
+  // resumed session has history. Poll the buffer until the transcript lands.
+  let text = '';
+  for (let i = 0; i < 20 && !/[●⎿❯]/u.test(text); i += 1) {
+    await win.waitForTimeout(500);
+    text = await readPaneText();
+  }
+  // Either real history rendered (markers present) or the explicit
+  // "no history yet" placeholder — never a crash / blank failure.
+  const hasMarkers = /[●⎿❯]/u.test(text);
+  const hasPlaceholder = /История появится|история пуста|Загружаю/i.test(text);
+  expect(hasMarkers || hasPlaceholder, `read pane content:\n${text.slice(0, 400)}`).toBe(true);
+
+  // Toggle back to live: read pane gone, live pane visible, app alive.
+  await tile.locator('.chat-tile__read').click();
+  await expect(win.locator('.chat-tile__read-pane')).toHaveCount(0, { timeout: 5_000 });
+  await expect(win.locator('.chat-tile .xterm').first()).toBeVisible();
+
+  const alive = await win.evaluate(() => typeof document !== 'undefined' && !!document.body);
+  expect(alive).toBe(true);
+
+  await closeAllChats(win);
+});

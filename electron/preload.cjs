@@ -121,6 +121,7 @@ const ALLOWED_CHANNELS = new Set([
   'load_session_transcript',
   'summarize_session',
   'rename_claude_session',
+  'scan_computer_for_sessions',
   // Session lineage / family tree
   'resolve_live_session',
   'list_session_tree',

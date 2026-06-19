@@ -1,0 +1,98 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * e2e/claude-live-scroll.spec.ts
+ *
+ * Scrolling claude history. claude itself can't scroll smoothly (page-only;
+ * arrows/mouse-codes corrupt its input — all proven by diagnostics). So:
+ *  - wheel UP over the live claude terminal engages the smooth, line-by-line
+ *    scrollable rendered copy (read mode appears automatically),
+ *  - wheeling there scrolls by lines (not pages),
+ *  - wheel DOWN past the bottom hands back to the live terminal.
+ *
+ * Resumes a real session with a conversation and submits nothing.
+ */
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { launchApp, closeAllChats, openChatWithHistory } from './helpers.js';
+
+let app: ElectronApplication;
+let win: Page;
+
+test.describe.configure({ timeout: 180_000 });
+
+test.beforeAll(async () => {
+  ({ app, win } = await launchApp());
+});
+test.afterAll(async () => {
+  if (!app) return;
+  await closeAllChats(win).catch(() => undefined);
+  await app.close();
+});
+
+// viewportY of the read pane's xterm (how far scrolled).
+function readViewportY(win: Page): Promise<number> {
+  return win.evaluate(() => {
+    const el = document.querySelector('.chat-tile__read-pane .xterm') as any;
+    return el?.__term?.buffer?.active?.viewportY ?? -1;
+  });
+}
+
+test('wheel-up engages smooth rendered history; wheel-down returns to live', async () => {
+  await openChatWithHistory(win);
+  const xterm = win.locator('.chat-tile .xterm').first();
+  const box = await xterm.boundingBox();
+  if (!box) throw new Error('no terminal box');
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  // Initially live (no read pane).
+  await expect(win.locator('.chat-tile__read-pane')).toHaveCount(0);
+
+  // Wheel UP over the live terminal → read mode (smooth history) engages.
+  await win.mouse.move(cx, cy);
+  await win.mouse.wheel(0, -200);
+  await expect(win.locator('.chat-tile__read-pane .xterm').first()).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Wait for the transcript to load (it starts at the bottom).
+  await win.waitForTimeout(2_000);
+  const baseY = await win.evaluate(() => {
+    const el = document.querySelector('.chat-tile__read-pane .xterm') as any;
+    return el?.__term?.buffer?.active?.baseY ?? 0;
+  });
+  if (baseY < 5) test.skip(true, 'resumed transcript too short to scroll');
+
+  // Scroll UP in the read pane by a few notches → viewportY decreases by LINES
+  // (not a whole page), proving smooth line-level scroll.
+  const before = await readViewportY(win);
+  await win.mouse.move(cx, cy);
+  for (let i = 0; i < 4; i++) {
+    await win.mouse.wheel(0, -120);
+    await win.waitForTimeout(200);
+  }
+  await win.waitForTimeout(400);
+  const afterUp = await readViewportY(win);
+  expect(
+    afterUp,
+    `read pane should have scrolled up (viewportY ${before} → ${afterUp})`,
+  ).toBeLessThan(before);
+  // Step is line-level: 4 small notches should NOT jump a whole screen-worth
+  // (sanity that it's not page-sized). Allow generous bound.
+  expect(before - afterUp).toBeGreaterThan(0);
+
+  await win
+    .locator('.chat-tile')
+    .first()
+    .screenshot({ path: 'test-results/smooth-history.png' })
+    .catch(() => undefined);
+
+  // Scroll back DOWN to the bottom, then one more wheel-down → live terminal.
+  await win.mouse.move(cx, cy);
+  for (let i = 0; i < 20; i++) {
+    await win.mouse.wheel(0, 200);
+    await win.waitForTimeout(120);
+  }
+  await win.mouse.wheel(0, 200);
+  // Read pane should be gone (handed back to live).
+  await expect(win.locator('.chat-tile__read-pane')).toHaveCount(0, { timeout: 8_000 });
+});

@@ -4,7 +4,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { IPC } from './channels.js';
 import {
-  spawnAgent,
+  spawnAgentSerialized,
   writeToAgent,
   resizeAgent,
   pauseAgent,
@@ -58,6 +58,7 @@ import {
 } from './git.js';
 import { createTask, deleteTask } from './tasks.js';
 import { listAgents } from './agents.js';
+import { scanForClaudeProjectRoots, defaultScanStartDirs } from './scan-computer.js';
 import { saveAppState, loadAppState } from './persistence.js';
 import { loadKeybindings, saveKeybindings } from './keybindings.js';
 import { spawn } from 'child_process';
@@ -191,7 +192,7 @@ export function registerAllHandlers(win: BrowserWindow): void {
   const taskNames = new Map<string, string>();
 
   // --- PTY commands ---
-  ipcMain.handle(IPC.SpawnAgent, (_e, args) => {
+  ipcMain.handle(IPC.SpawnAgent, async (_e, args) => {
     assertString(args.command, 'command');
     assertStringArray(args.args, 'args');
     assertString(args.taskId, 'taskId');
@@ -209,7 +210,10 @@ export function registerAllHandlers(win: BrowserWindow): void {
         console.warn('Failed to set up plans directory:', err);
       }
     }
-    const result = spawnAgent(win, args);
+    // Serialised so a mass restore / project-open never fires N concurrent
+    // ConPTY connects into conpty.node (the Windows heap-corruption crash on
+    // launch). One spawn at a time, small gap between.
+    const result = await spawnAgentSerialized(win, args);
     if (!args.isShell && args.cwd) {
       try {
         startPlanWatcher(win, args.taskId, args.cwd);
@@ -976,6 +980,16 @@ export function registerAllHandlers(win: BrowserWindow): void {
     handler: ({ sessionId, alias }) => renameSession(sessionId, alias),
   });
 
+  // Onboarding: scan the whole computer (or one folder) for claude session
+  // roots. Returns directories to add as extra scan folders. Bounded walk —
+  // see scan-computer.ts. With { folder } given, scans just that subtree.
+  ipcMain.handle(IPC.ScanComputerForSessions, (_e, args) => {
+    const folder = typeof args?.folder === 'string' && args.folder ? args.folder : undefined;
+    if (folder) validatePath(folder, 'folder');
+    const startDirs = folder ? [folder] : defaultScanStartDirs();
+    return scanForClaudeProjectRoots(startDirs);
+  });
+
   ipcMain.handle(IPC.LoadSessionTranscript, (_e, args) => {
     const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : undefined;
     const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined;
@@ -1002,7 +1016,12 @@ export function registerAllHandlers(win: BrowserWindow): void {
     const sessionId = args.sessionId as string;
     const sinceMs = typeof args?.sinceMs === 'number' ? args.sinceMs : Date.now();
     const waitMs = typeof args?.waitMs === 'number' ? Math.min(args.waitMs, 300_000) : 0;
-    const res = await resolveLiveSessionId({ sessionId, sinceMs, waitMs });
+    // ids already claimed by sibling tiles — so a branched tile doesn't
+    // glue onto its parent's continuation (both copy the same anchor uuid).
+    const excludeSessionIds = Array.isArray(args?.excludeSessionIds)
+      ? (args.excludeSessionIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined;
+    const res = await resolveLiveSessionId({ sessionId, sinceMs, waitMs, excludeSessionIds });
     if (res.changed) {
       // The continuation is the same logical thread: record the edge and
       // carry the user's name over so the new file isn't anonymous.

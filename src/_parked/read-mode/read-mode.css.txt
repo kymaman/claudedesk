@@ -1,0 +1,64 @@
+/* Снятые из src/components/ChatsGrid.css блоки режима чтения (2026-06-19).
+   Вставить обратно при возврате фичи. См. README.md в этой папке. */
+
+/* Живой и read-only паны накладываются; read mode прячет живой (display:none),
+   чтобы PTY жил. */
+.chat-tile__live,
+.chat-tile__read-pane {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-tile__read-pane {
+  background: var(--bg, #16161c);
+}
+
+/* Живой claude-терминал плавно не скроллится → прячем родной скроллбар. */
+.chat-tile__live .xterm-viewport {
+  scrollbar-width: none;
+}
+.chat-tile__live .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Панель чтения — реальная поверхность прокрутки, со стилизованным скроллбаром. */
+.chat-tile__read-pane .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg-muted, #8a8a99) 55%, transparent) transparent;
+}
+.chat-tile__read-pane .xterm-viewport::-webkit-scrollbar {
+  width: 12px;
+}
+.chat-tile__read-pane .xterm-viewport::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-muted, #8a8a99) 50%, transparent);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.chat-tile__read-pane .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent, #6ab0ff) 70%, transparent);
+  background-clip: padding-box;
+}
+
+/* Кнопка режима чтения 📖 в шапке тайла. */
+.chat-tile__read {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.chat-tile__read:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.chat-tile__read--on {
+  color: var(--accent);
+}

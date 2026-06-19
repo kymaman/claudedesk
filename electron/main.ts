@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from 'electron';
+import { app, BrowserWindow, crashReporter, session, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -13,6 +13,65 @@ import { resolveUserShell } from './user-shell.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ---------------------------------------------------------------------------
+// Crash diagnostics
+// ---------------------------------------------------------------------------
+//
+// The app previously captured NOTHING when it died: no crashReporter, no file
+// log. A native heap-corruption crash (Windows c0000374) on "branch" therefore
+// left only an opaque WER StackHash with no faulting module. We now:
+//   1. start the local crashReporter so a minidump (.dmp) lands in
+//      app.getPath('crashDumps') with the real faulting module/stack;
+//   2. append a human-readable line to <userData>/crash.log on every
+//      render/child-process death and uncaught main-process exception, so the
+//      next reproduction is diagnosable without a debugger.
+// Must run as early as possible — crashReporter.start has to precede the
+// process work it instruments.
+
+function crashLogPath(): string {
+  try {
+    return path.join(app.getPath('userData'), 'crash.log');
+  } catch {
+    return path.join(os.tmpdir(), 'claudedesk-crash.log');
+  }
+}
+
+function appendCrashLog(line: string): void {
+  try {
+    fs.appendFileSync(crashLogPath(), `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    /* best-effort: never let logging throw in a crash path */
+  }
+}
+
+function setupCrashDiagnostics(): void {
+  try {
+    crashReporter.start({ submitURL: '', uploadToServer: false, compress: true });
+  } catch (err) {
+    appendCrashLog(`crashReporter.start failed: ${String(err)}`);
+  }
+  // A child process (GPU, utility, PID host for ConPTY, renderer host) dying
+  // is exactly what a node-pty heap corruption looks like from the main side.
+  app.on('child-process-gone', (_e, details) => {
+    appendCrashLog(
+      `child-process-gone type=${details.type} reason=${details.reason} ` +
+        `exitCode=${details.exitCode}${details.name ? ` name=${details.name}` : ''}` +
+        `${details.serviceName ? ` service=${details.serviceName}` : ''}`,
+    );
+  });
+  app.on('render-process-gone', (_e, _wc, details) => {
+    appendCrashLog(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  process.on('uncaughtException', (err) => {
+    appendCrashLog(`uncaughtException: ${err?.stack ?? String(err)}`);
+  });
+  process.on('unhandledRejection', (reason) => {
+    appendCrashLog(`unhandledRejection: ${String(reason)}`);
+  });
+}
+
+setupCrashDiagnostics();
 
 // When launched from a .desktop file (e.g. AppImage), the environment is
 // minimal — often just PATH=/usr/bin:/bin. Resolve the user's full

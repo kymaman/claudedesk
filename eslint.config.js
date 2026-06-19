@@ -15,6 +15,8 @@ export default [
       'node_modules/**',
       '.worktrees/**',
       '.claude/**',
+      // Parked/archived code is not part of any tsconfig project; don't lint it.
+      'src/_parked/**',
       // Build config is excluded from electron tsconfig; ignore the config and its test.
       'electron/vite.config.electron.ts',
       'electron/vite.config.electron.test.ts',

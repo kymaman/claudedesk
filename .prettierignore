@@ -5,6 +5,7 @@ release/
 node_modules/
 .worktrees/
 .claude/
+src/_parked/
 .enzyme/
 .omc/
 .planning/

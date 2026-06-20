@@ -19,7 +19,9 @@ import {
   unregisterDrainControl,
   noteHeavyOutput,
 } from './output-scheduler.js';
-import { LocalPtyBackend, type PtyExitEvent } from './pty-backend.js';
+import { LocalPtyBackend, type PtyBackend, type PtyExitEvent } from './pty-backend.js';
+import { RemotePtyBackend } from './pty-backend-remote.js';
+import type { MessageTransport } from './pty-protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,9 +68,23 @@ const sessions = new Map<string, PtySession>();
 // and are dispatched to the owning session's handlers; the backend only ever
 // surfaces events from the CURRENT proc for an agentId, so a replaced session's
 // old handle can't feed or tear down the fresh one.
-const backend = new LocalPtyBackend();
-backend.setOnData((agentId, data) => sessions.get(agentId)?.handleData?.(data));
-backend.setOnExit((agentId, ev) => sessions.get(agentId)?.handleExit?.(ev));
+let backend: PtyBackend = new LocalPtyBackend();
+
+/** Wire a backend's data/exit events to the owning sessions (by agentId). */
+function wireBackend(b: PtyBackend): void {
+  b.setOnData((agentId, data) => sessions.get(agentId)?.handleData?.(data));
+  b.setOnExit((agentId, ev) => sessions.get(agentId)?.handleExit?.(ev));
+}
+wireBackend(backend);
+
+/** Swap node-pty out of the main process: route all PTY ops through a transport
+ *  to a host child (RemotePtyBackend). Called once at startup (behind a flag)
+ *  BEFORE any agent spawns. The default stays the in-process LocalPtyBackend, so
+ *  tests and the un-flagged app are unchanged. */
+export function usePtyHostBackend(transport: MessageTransport): void {
+  backend = new RemotePtyBackend(transport);
+  wireBackend(backend);
+}
 
 // --- PTY event bus for spawn/exit notifications ---
 //

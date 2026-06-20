@@ -5,7 +5,9 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { registerAllHandlers } from './ipc/register.js';
-import { killAllAgents } from './ipc/pty.js';
+import { killAllAgents, usePtyHostBackend } from './ipc/pty.js';
+import { PtyHostManager } from './ipc/pty-host-manager.js';
+import { forkPtyHostChild } from './ipc/pty-host-child.js';
 import { stopAllPlanWatchers } from './ipc/plans.js';
 import { stopAllStepsWatchers } from './ipc/steps.js';
 import { IPC } from './ipc/channels.js';
@@ -273,7 +275,27 @@ function createWindow() {
   });
 }
 
+// Process isolation (opt-in via CLAUDEDESK_PTY_HOST=1): run node-pty in a child
+// utilityProcess so a conpty.node heap corruption kills only that process — the
+// PtyHostManager reports the dead terminals and forks a fresh host, the app
+// survives. Default (flag unset) keeps node-pty in-process, unchanged.
+let ptyHostManager: PtyHostManager | null = null;
+function initPtyHostIfEnabled(): void {
+  if (process.env['CLAUDEDESK_PTY_HOST'] !== '1') return;
+  try {
+    ptyHostManager = new PtyHostManager(forkPtyHostChild);
+    usePtyHostBackend(ptyHostManager);
+    console.warn('[pty-host] process isolation ENABLED (node-pty in utilityProcess)');
+  } catch (err) {
+    console.error('[pty-host] failed to start; falling back to in-process node-pty:', err);
+    ptyHostManager = null;
+  }
+}
+
 app.whenReady().then(() => {
+  // Run node-pty out of process BEFORE any agent spawns, when enabled.
+  initPtyHostIfEnabled();
+
   // Grant microphone and clipboard access (deny camera/video)
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
@@ -293,6 +315,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   killAllAgents();
+  // Tear the PTY host child down WITHOUT triggering a restart.
+  ptyHostManager?.shutdown();
   stopAllPlanWatchers();
   stopAllStepsWatchers();
 });

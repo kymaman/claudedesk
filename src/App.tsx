@@ -16,6 +16,7 @@ import { assistantOpen } from './store/assistant';
 import { NewSessionBar } from './components/NewSessionBar';
 import { mainView, setMainView } from './store/mainView';
 import { refitAll } from './lib/terminalFitManager';
+import { pickDiskTitle } from './lib/title-sync';
 import { DragMime } from './lib/drag-mime';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { HelpDialog } from './components/HelpDialog';
@@ -266,8 +267,11 @@ function App() {
     const byId = new Map<string, string>();
     for (const s of sessions()) if (s.sessionId && s.title) byId.set(s.sessionId, s.title);
     for (const c of openChats()) {
-      if (!c.sessionId) continue;
-      const diskTitle = byId.get(c.sessionId);
+      // pickDiskTitle also covers the case where the tile just advanced to a
+      // freshly-minted live sessionId the disk scan hasn't indexed yet: it falls
+      // back to the most recent PAST sessionId's title so the tile doesn't snap
+      // to its stale base title while History shows the fresh one.
+      const diskTitle = pickDiskTitle(c, byId);
       if (diskTitle) setDiskTitleForChat(c.id, diskTitle);
     }
   });

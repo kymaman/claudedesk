@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { loadSessionTranscript } from './session-transcript.js';
+import { loadSessionTranscript, chooseRevealTarget } from './session-transcript.js';
 
 function writeJsonl(file: string, entries: unknown[]): void {
   fs.writeFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
@@ -374,5 +374,30 @@ describe('loadSessionTranscript — huge-file tail seek', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('chooseRevealTarget — "Open dialog folder" picks the transcript, not the cwd', () => {
+  it('reveals the session .jsonl when it exists (opens its folder, selects it)', () => {
+    const file = '/home/u/.claude/projects/-home-u-proj/abc.jsonl';
+    expect(chooseRevealTarget(file, '/home/u/proj')).toEqual({ kind: 'reveal', path: file });
+  });
+
+  it('falls back to opening the working dir when there is no session file yet', () => {
+    expect(chooseRevealTarget(null, '/home/u/proj')).toEqual({
+      kind: 'open',
+      path: '/home/u/proj',
+    });
+  });
+
+  it('prefers the session file over the fallback (never the project cwd when a dialog exists)', () => {
+    const file = '/p/x.jsonl';
+    const target = chooseRevealTarget(file, '/work/dir');
+    expect(target).toEqual({ kind: 'reveal', path: file });
+  });
+
+  it('returns null when neither a session file nor a fallback is available', () => {
+    expect(chooseRevealTarget(null)).toBeNull();
+    expect(chooseRevealTarget(null, undefined)).toBeNull();
   });
 });

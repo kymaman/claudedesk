@@ -96,7 +96,11 @@ import {
   getLineageOverrides,
   getAlias,
 } from './session-history.js';
-import { loadSessionTranscript } from './session-transcript.js';
+import {
+  loadSessionTranscript,
+  findSessionFile,
+  chooseRevealTarget,
+} from './session-transcript.js';
 import { summarizeSession } from './session-summarize.js';
 import { listSessionFamilies, resolveLiveSessionId } from './session-lineage.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
@@ -646,6 +650,24 @@ export function registerAllHandlers(win: BrowserWindow): void {
     }
     return shell.openPath(args.filePath);
   });
+
+  // Reveal the folder that actually holds a chat's dialog — the session .jsonl
+  // under ~/.claude/projects/<encoded>/ — selecting the file. Falls back to the
+  // working dir for a fresh chat that has no session file yet.
+  ipcMain.handle(
+    IPC.RevealSessionFile,
+    (_e, args: { sessionId?: string; fallbackDir?: string }) => {
+      const sessionFile = args.sessionId ? findSessionFile(args.sessionId) : null;
+      const target = chooseRevealTarget(sessionFile, args.fallbackDir);
+      if (!target) return false;
+      if (target.kind === 'reveal') {
+        shell.showItemInFolder(target.path);
+      } else {
+        void shell.openPath(target.path);
+      }
+      return true;
+    },
+  );
 
   ipcMain.handle(IPC.ReadFileText, async (_e, args) => {
     validatePath(args.filePath, 'filePath');

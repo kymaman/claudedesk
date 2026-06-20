@@ -116,6 +116,9 @@ export enum IPC {
   // File links
   OpenPath = 'open_path',
   ReadFileText = 'read_file_text',
+  // Reveal the folder that holds a chat's session .jsonl (the dialog folder),
+  // not the project working dir.
+  RevealSessionFile = 'reveal_session_file',
 
   // Clipboard
   SaveClipboardImage = 'save_clipboard_image',

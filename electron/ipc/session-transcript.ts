@@ -291,7 +291,7 @@ function renderTurn(turn: Turn, toolResults: Map<string, string>): string {
 // File lookup
 // ---------------------------------------------------------------------------
 
-function findSessionFile(sessionId: string): string | null {
+export function findSessionFile(sessionId: string): string | null {
   const root = getClaudeProjectsDir();
   if (!fs.existsSync(root)) return null;
   const stack = [root];
@@ -310,6 +310,24 @@ function findSessionFile(sessionId: string): string | null {
       else if (ent.isFile() && ent.name === `${sessionId}.jsonl`) return full;
     }
   }
+  return null;
+}
+
+/**
+ * Decide what to reveal for a chat's "Open folder" action. We want the folder
+ * that actually holds the conversation — the session's `.jsonl` under
+ * ~/.claude/projects/<encoded>/ — NOT the project working directory. So if the
+ * session file was found, reveal IT (the OS opens its folder and selects it);
+ * otherwise (fresh chat with no session yet) fall back to opening the working
+ * dir; if neither is available, do nothing. Pure so it can be unit-tested
+ * without the filesystem or Electron shell.
+ */
+export function chooseRevealTarget(
+  sessionFile: string | null,
+  fallbackDir?: string,
+): { kind: 'reveal'; path: string } | { kind: 'open'; path: string } | null {
+  if (sessionFile) return { kind: 'reveal', path: sessionFile };
+  if (fallbackDir) return { kind: 'open', path: fallbackDir };
   return null;
 }
 

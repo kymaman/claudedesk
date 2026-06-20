@@ -297,16 +297,20 @@ function ChatTile(props: { chat: Chat; hidden?: boolean }) {
               onClick={(e) => {
                 e.stopPropagation();
                 setMenuOpen(false);
-                // Open the chat's working directory in the OS file
-                // manager. OpenPath accepts folders fine — the dangerous-
-                // extension regex never matches a directory path.
-                void invoke<string>(IPC.OpenPath, { filePath: props.chat.cwd }).catch((err) => {
-                  console.warn('[chat-tile] OpenPath failed:', err);
+                // Open the folder that holds this chat's DIALOG — the session
+                // .jsonl under ~/.claude/projects/<encoded>/ — not the project
+                // working dir. Falls back to the working dir for a fresh chat
+                // that has no session file yet.
+                void invoke<boolean>(IPC.RevealSessionFile, {
+                  sessionId: props.chat.sessionId,
+                  fallbackDir: props.chat.cwd,
+                }).catch((err) => {
+                  console.warn('[chat-tile] RevealSessionFile failed:', err);
                 });
               }}
-              title={props.chat.cwd}
+              title="Open the folder with this chat's transcript (.jsonl)"
             >
-              Open folder
+              Open dialog folder
             </button>
             <button
               class="chat-tile__menu-item"

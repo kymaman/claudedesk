@@ -1110,15 +1110,20 @@ function SessionRow(props: {
             onClick={(e) => {
               e.stopPropagation();
               setMenuOpen(false);
-              void invoke<string>(IPC.OpenPath, {
-                filePath: props.session.projectPath,
-              }).catch((err) => {
-                console.warn('[session-row] OpenPath failed:', err);
-              });
+              // Reveal the dialog itself — the session .jsonl under
+              // ~/.claude/projects/<encoded>/ — opening its folder and
+              // selecting the file, NOT the project working dir.
+              if (props.session.filePath) {
+                void invoke(IPC.ShellReveal, {
+                  filePath: props.session.filePath,
+                }).catch((err) => {
+                  console.warn('[session-row] ShellReveal failed:', err);
+                });
+              }
             }}
-            title={props.session.projectPath}
+            title={props.session.filePath}
           >
-            Open folder
+            Open dialog folder
           </button>
           <button
             class="session-item__menu-item"

@@ -86,14 +86,17 @@ import {
   hashDockerfile,
   killAgent,
   killAllAgents,
+  pauseAgent,
   projectImageTag,
   resizeAgent,
   resolveProjectDockerfile,
+  resumeAgent,
   spawnAgent,
   spawnAgentSerialized,
   validateCommand,
   writeToAgent,
 } from './pty.js';
+import { __setDrainSliceMsForTests, __resetDrainSchedulerForTests } from './output-scheduler.js';
 
 let tempPaths: string[] = [];
 let agentCounter = 0;
@@ -595,5 +598,104 @@ describe('buildDockerImage', () => {
     expect(lastCall).toBeTruthy();
     const args = ((lastCall as unknown as [string, string[]])?.[1] ?? []) as string[];
     expect(args[args.length - 1]).toBe(projectRoot);
+  });
+});
+
+describe('cross-terminal output-drain scheduler (5th branch-crash trigger: dual /compact)', () => {
+  interface MockProc {
+    pause: ReturnType<typeof vi.fn>;
+    resume: ReturnType<typeof vi.fn>;
+    emitData(data: string): void;
+  }
+
+  // A single read larger than HEAVY_OUTPUT_BYTES (4 KB) — i.e. a burst, the kind
+  // a /compact flood produces, not an interactive keystroke echo.
+  const HEAVY = 'x'.repeat(5000);
+
+  beforeEach(() => {
+    __setLifecycleGuardMsForTests(0);
+    __resetDrainSchedulerForTests();
+    __setDrainSliceMsForTests(20); // deterministic slice regardless of host OS
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __resetDrainSchedulerForTests();
+    __setDrainSliceMsForTests(0);
+  });
+
+  function lastProc(): MockProc {
+    const results = mockPtySpawn.mock.results;
+    const last = results[results.length - 1];
+    if (!last) throw new Error('expected a pty.spawn result');
+    return last.value as MockProc;
+  }
+
+  function spawnTwo(): { idA: string; idB: string; procA: MockProc; procB: MockProc } {
+    const win = createMockWindow();
+    const idA = nextAgentId();
+    const idB = nextAgentId();
+    spawnAgent(win, buildSpawnArgs({ agentId: idA, dockerMode: false }));
+    const procA = lastProc();
+    spawnAgent(win, buildSpawnArgs({ agentId: idB, dockerMode: false }));
+    const procB = lastProc();
+    return { idA, idB, procA, procB };
+  }
+
+  it('pauses the second terminal when both burst at once, resumes it on the next slice', () => {
+    const { procA, procB } = spawnTwo();
+
+    procA.emitData(HEAVY); // A takes the drain token
+    procB.emitData(HEAVY); // B bursts behind A → paused so two PTYs never flood ConPTY at once
+
+    expect(procB.pause).toHaveBeenCalledTimes(1);
+    expect(procA.pause).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(20); // slice elapses → token rotates to B
+    expect(procB.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('a small (interactive) read never engages the scheduler', () => {
+    const { procA, procB } = spawnTwo();
+    procA.emitData('prompt> '); // tiny read
+    procB.emitData('y\r\n'); // tiny read
+    expect(procA.pause).not.toHaveBeenCalled();
+    expect(procB.pause).not.toHaveBeenCalled();
+  });
+
+  it('a renderer resume does NOT override a scheduler pause (combined intent)', () => {
+    const { idB, procA, procB } = spawnTwo();
+
+    procA.emitData(HEAVY);
+    procB.emitData(HEAVY); // B scheduler-paused
+    expect(procB.pause).toHaveBeenCalledTimes(1);
+
+    // Renderer thinks B caught up and resumes — but the scheduler still holds it.
+    resumeAgent(idB);
+    expect(procB.resume).not.toHaveBeenCalled(); // still paused by the scheduler
+
+    vi.advanceTimersByTime(20); // scheduler releases B
+    expect(procB.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('native pause/resume fire only on edges (no redundant socket calls)', () => {
+    const { idA, procA } = spawnTwo();
+    pauseAgent(idA);
+    pauseAgent(idA); // redundant — already paused
+    expect(procA.pause).toHaveBeenCalledTimes(1);
+    resumeAgent(idA);
+    resumeAgent(idA); // redundant — already resumed
+    expect(procA.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('killing the holder immediately resumes a sibling paused behind it', () => {
+    const { idA, procA, procB } = spawnTwo();
+    procA.emitData(HEAVY); // A holder
+    procB.emitData(HEAVY); // B paused
+    expect(procB.pause).toHaveBeenCalledTimes(1);
+
+    killAgent(idA); // holder gone → token freed, sibling resumed without waiting a slice
+    expect(procB.resume).toHaveBeenCalledTimes(1);
   });
 });

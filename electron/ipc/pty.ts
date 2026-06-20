@@ -15,6 +15,11 @@ import {
   containsShellMetachars,
   validateCommandOnPath,
 } from '../platform.js';
+import {
+  registerDrainControl,
+  unregisterDrainControl,
+  noteHeavyOutput,
+} from './output-scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +42,16 @@ interface PtySession {
    *  coalesced resize burst on a grid reflow (e.g. branching a chat) is the
    *  classic way a late resize reaches a just-exited PTY. */
   exited: boolean;
+  /** Pause intent from the renderer's per-terminal flow control (xterm behind).
+   *  The PTY's pipe is paused when EITHER this or schedulerPaused is set, so the
+   *  two controllers compose instead of fighting over the same socket. */
+  rendererPaused: boolean;
+  /** Pause intent from the cross-terminal output-drain scheduler (it holds the
+   *  pipe while another terminal drains a heavy burst — 5th branch-crash fix). */
+  schedulerPaused: boolean;
+  /** The pause state we have actually applied to the native socket, so we only
+   *  call proc.pause()/resume() on an EDGE (never redundantly). */
+  nativePaused: boolean;
 }
 
 const sessions = new Map<string, PtySession>();
@@ -79,6 +94,11 @@ const BATCH_MAX = 64 * 1024;
 const BATCH_INTERVAL = 8; // ms
 const TAIL_CAP = 8 * 1024;
 const MAX_LINES = 50;
+// A single read at least this big counts as a "burst" for the cross-terminal
+// drain scheduler. Interactive echo/prompt reads are tiny (<1KB); a /compact or
+// other flood arrives in large chunks. Above this we ask the scheduler whether
+// to keep draining or yield to a sibling terminal (Windows ConPTY race only).
+const HEAVY_OUTPUT_BYTES = 4 * 1024;
 
 /** Verify that a command exists in PATH. Throws a descriptive error if not found. */
 export function validateCommand(command: string): void {
@@ -146,6 +166,9 @@ export function spawnAgent(
     markLifecycle();
     existing.proc.kill();
     sessions.delete(args.agentId);
+    // Drop any stale scheduler state for this agentId before the fresh spawn
+    // re-registers it (the replaced session's async onExit will early-return).
+    unregisterDrainControl(args.agentId);
   }
 
   const filteredEnv: Record<string, string> = {};
@@ -263,11 +286,27 @@ export function spawnAgent(
     scrollback: new RingBuffer(),
     containerName,
     exited: false,
+    rendererPaused: false,
+    schedulerPaused: false,
+    nativePaused: false,
   };
   sessions.set(args.agentId, session);
   // A ConPTY connect just started on a background thread — open the guard
   // window so the grid-reflow resize storm defers instead of racing it.
   markLifecycle();
+  // Register pause/resume so the cross-terminal drain scheduler can hold this
+  // PTY's pipe while a sibling drains a heavy burst (composes with the
+  // renderer's own flow control via applyPauseState).
+  registerDrainControl(args.agentId, {
+    pause: () => {
+      session.schedulerPaused = true;
+      applyPauseState(session);
+    },
+    resume: () => {
+      session.schedulerPaused = false;
+      applyPauseState(session);
+    },
+  });
 
   // Batching strategy matching the Rust implementation
   let batchChunks: Buffer[] = [];
@@ -314,6 +353,11 @@ export function spawnAgent(
 
   proc.onData((data: string) => {
     const chunk = Buffer.from(data, 'utf8');
+
+    // A heavy read means this PTY is bursting — let the scheduler decide whether
+    // it keeps the drain token or yields, so two terminals never flood
+    // conpty.node's allocator at once (Windows c0000374 heap-corruption fix).
+    if (chunk.length >= HEAVY_OUTPUT_BYTES) noteHeavyOutput(session.agentId);
 
     // Maintain tail buffer for exit diagnostics
     tailChunks.push(chunk);
@@ -385,6 +429,9 @@ export function spawnAgent(
 
     emitPtyEvent('exit', args.agentId, { exitCode, signal });
     sessions.delete(args.agentId);
+    // Free the scheduler's reference so it never resumes a dead pipe and hands
+    // the drain token on to a live sibling if this one held it.
+    unregisterDrainControl(args.agentId);
   });
 
   emitPtyEvent('spawn', args.agentId);
@@ -539,16 +586,38 @@ export function resizeAgent(agentId: string, cols: number, rows: number): void {
   }
 }
 
+/** Apply the combined pause intent (renderer flow-control OR drain scheduler) to
+ *  the native pipe, but only on a real edge so we never call pause()/resume()
+ *  redundantly. Skips exited sessions — touching a dead ConPTY handle is the
+ *  uncatchable c0000374 we guard against everywhere else. */
+function applyPauseState(session: PtySession): void {
+  if (session.exited) return;
+  const shouldPause = session.rendererPaused || session.schedulerPaused;
+  if (shouldPause === session.nativePaused) return;
+  try {
+    if (shouldPause) session.proc.pause();
+    else session.proc.resume();
+    session.nativePaused = shouldPause;
+  } catch (err) {
+    console.warn(`[pty] pause/resume failed for ${session.agentId}:`, err);
+  }
+}
+
 export function pauseAgent(agentId: string): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
-  session.proc.pause();
+  // Renderer-driven pause (xterm fell behind). Composes with any scheduler pause.
+  session.rendererPaused = true;
+  applyPauseState(session);
 }
 
 export function resumeAgent(agentId: string): void {
   const session = sessions.get(agentId);
   if (!session) throw new Error(`Agent not found: ${agentId}`);
-  session.proc.resume();
+  // Renderer caught up; the PTY only actually resumes if the scheduler also
+  // isn't holding it back.
+  session.rendererPaused = false;
+  applyPauseState(session);
 }
 
 export function killAgent(agentId: string): void {
@@ -571,6 +640,9 @@ export function killAgent(agentId: string): void {
     // Opening the guard window before tearing the ConPTY down keeps a
     // concurrent grid-reflow resize from racing conpty.node's teardown.
     markLifecycle();
+    // Free the drain token now (don't wait for the async onExit) so a sibling
+    // that was paused behind this one resumes immediately.
+    unregisterDrainControl(agentId);
     session.proc.kill();
   }
 }
@@ -593,6 +665,7 @@ export function killAllAgents(): void {
         // Intentionally ignore: container may not exist or may have already stopped.
       }
     }
+    unregisterDrainControl(session.agentId);
     session.proc.kill();
   }
   // Let onExit handlers clean up sessions individually

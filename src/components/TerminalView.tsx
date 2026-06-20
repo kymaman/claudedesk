@@ -242,10 +242,13 @@ export function TerminalView(props: TerminalViewProps) {
 
     // Wheel-to-scroll (policy lives in lib/terminal-wheel.ts, unit-tested):
     //  - shell (real xterm scrollback): scroll the buffer by whole lines.
-    //  - claude TUI: claude has no usable xterm scrollback but scrolls its OWN
-    //    transcript on PageUp/PageDown, so we translate each wheel notch into
-    //    those keys and write them to the PTY. claude then scrolls itself and
-    //    shows its "Jump to bottom (ctrl+End)" hint. No read-mode switch.
+    //  - claude TUI (old, baseY===0): claude repaints in place with no usable
+    //    xterm scrollback but scrolls its OWN transcript on PageUp/PageDown, so
+    //    we translate each wheel notch into those keys and write them to the
+    //    PTY. claude then scrolls itself and shows its "Jump to bottom" hint.
+    //  - claude TUI (2.1.183+, baseY>0): claude now fills xterm's native
+    //    scrollback, so we scroll THAT directly (PageUp would move nothing the
+    //    user can see). hasScrollback below selects between the two.
     // Ctrl+wheel (zoom) and the alternate screen bubble untouched.
     const onContainerWheel = (e: WheelEvent) => {
       if (!term) return;
@@ -254,6 +257,10 @@ export function TerminalView(props: TerminalViewProps) {
         deltaMode: e.deltaMode,
         altScreen: term.buffer.active.type === 'alternate',
         claudeTui: claudeTuiTerminal,
+        // claude 2.1.183 fills xterm's native scrollback; when it has lines
+        // above the viewport, scroll THAT instead of sending PageUp (the wheel
+        // had nothing to move via PageUp once real scrollback exists).
+        hasScrollback: term.buffer.active.baseY > 0,
         ctrlKey: e.ctrlKey,
         linesPerNotch: WHEEL_LINES_PER_NOTCH,
       });

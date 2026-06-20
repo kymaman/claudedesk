@@ -19,6 +19,16 @@
  * For a plain shell (which fills xterm's own scrollback) we keep the old
  * whole-line, nothing-skipped scrollback scrolling.
  *
+ * UPDATE (2026-06-19, claude auto-updated to 2.1.183): the premise above
+ * changed. claude 2.1.183 NOW FILLS xterm's native scrollback (baseY grew to
+ * 227 in diagnostics) instead of repainting in place. With real scrollback
+ * present, PageUp moves nothing the user can see — so when `hasScrollback` is
+ * true we scroll xterm's OWN scrollback even for a claude TUI. The PageUp
+ * эталон is kept ONLY for the no-scrollback case (baseY===0) it was proven on,
+ * so old-claude behaviour is byte-identical. (The crash the user saw was a
+ * red herring: reopening after it relaunched claude, which picked up the
+ * auto-update.)
+ *
  * Pure / DOM-free so it unit-tests cleanly (the caller performs the side
  * effect — scrollLines for a shell, or writing the keys to the PTY).
  */
@@ -46,6 +56,12 @@ export interface WheelInput {
    *  no mouse tracking, but scrolls its transcript on PageUp/PageDown. When
    *  set we translate the wheel into those keys for the PTY. */
   claudeTui: boolean;
+  /** true when xterm's OWN scrollback actually has lines above the viewport
+   *  (term.buffer.active.baseY > 0). Old claude repainted in place so this was
+   *  always false (the PageUp эталон was the only way to scroll). claude 2.1.183
+   *  fills the native scrollback, so when it has content we scroll THAT instead
+   *  — even for a claude TUI. Optional; absent/false ⇒ the old PageUp path. */
+  hasScrollback?: boolean;
   /** Ctrl held = zoom gesture; leave it for the global zoom handler. */
   ctrlKey: boolean;
   /** Whole lines to move per ~one wheel notch (shell scrollback case). */
@@ -87,7 +103,14 @@ export function planWheelScroll(input: WheelInput): WheelPlan {
   const notches = notchesOf(input.deltaY, input.deltaMode);
   const dir = notches > 0 ? 1 : -1; // +1 = wheel down (toward newest), -1 = up
 
-  if (input.claudeTui) {
+  // claude TUI with NO real xterm scrollback (old claude repainted in place):
+  // the эталон — translate the wheel into PageUp/PageDown so claude scrolls its
+  // own transcript. As of claude 2.1.183 the live transcript fills xterm's
+  // native scrollback (baseY>0); when it has content (hasScrollback) we fall
+  // through and scroll that real scrollback instead — the PageUp had nothing to
+  // move there. The эталон path stays byte-identical for the no-scrollback case
+  // it was designed for.
+  if (input.claudeTui && !input.hasScrollback) {
     // One page per notch, scaled by spin strength, at least one page.
     const pages = Math.max(1, Math.round(Math.abs(notches)));
     const key = dir < 0 ? PAGE_UP : PAGE_DOWN;

@@ -86,6 +86,51 @@ describe('planWheelScroll — claude TUI (PageUp/PageDown to PTY)', () => {
       data: PAGE_UP,
     });
   });
+
+  it('эталон preserved: no real scrollback (baseY===0) still uses PageUp', () => {
+    // hasScrollback omitted/false ⇒ the old-claude PageUp path, byte-identical.
+    expect(planWheelScroll({ ...claude, deltaY: -100, hasScrollback: false })).toEqual({
+      action: 'ptyKeys',
+      data: PAGE_UP,
+    });
+  });
+});
+
+describe('planWheelScroll — claude TUI 2.1.183 (native scrollback present)', () => {
+  // claude 2.1.183 fills xterm's own scrollback (baseY>0). When it has content
+  // the wheel must scroll THAT (PageUp would move nothing visible). Same whole-
+  // line behaviour as a plain shell.
+  const claudeScrolled = { ...claude, hasScrollback: true };
+
+  it('THE FIX: wheel UP scrolls native scrollback by whole lines, not PageUp', () => {
+    expect(planWheelScroll({ ...claudeScrolled, deltaY: -100 })).toEqual({
+      action: 'scrollback',
+      scrollLines: -3,
+    });
+  });
+
+  it('wheel DOWN scrolls native scrollback the other way', () => {
+    expect(planWheelScroll({ ...claudeScrolled, deltaY: 100 })).toEqual({
+      action: 'scrollback',
+      scrollLines: 3,
+    });
+  });
+
+  it('scales with spin strength, whole lines', () => {
+    expect(planWheelScroll({ ...claudeScrolled, deltaY: -250 })).toEqual({
+      action: 'scrollback',
+      scrollLines: -8,
+    });
+  });
+
+  it('still hands off zoom and the alternate screen even with scrollback', () => {
+    expect(planWheelScroll({ ...claudeScrolled, deltaY: 100, ctrlKey: true })).toEqual({
+      action: 'ignore',
+    });
+    expect(planWheelScroll({ ...claudeScrolled, deltaY: 100, altScreen: true })).toEqual({
+      action: 'ignore',
+    });
+  });
 });
 
 describe('planWheelScroll — hand-off cases', () => {

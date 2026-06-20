@@ -1,4 +1,3 @@
-import * as pty from 'node-pty';
 import { execFileSync, execFile, spawn as cpSpawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -20,12 +19,12 @@ import {
   unregisterDrainControl,
   noteHeavyOutput,
 } from './output-scheduler.js';
+import { LocalPtyBackend, type PtyExitEvent } from './pty-backend.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 interface PtySession {
-  proc: pty.IPty;
   channelId: string;
   taskId: string;
   agentId: string;
@@ -52,9 +51,24 @@ interface PtySession {
   /** The pause state we have actually applied to the native socket, so we only
    *  call proc.pause()/resume() on an EDGE (never redundantly). */
   nativePaused: boolean;
+  /** Per-session sinks for the backend's data/exit events (keyed by agentId at
+   *  the seam). Assigned during spawn; the backend never delivers before then. */
+  handleData?: (data: string) => void;
+  handleExit?: (ev: PtyExitEvent) => void;
 }
 
 const sessions = new Map<string, PtySession>();
+
+// All node-pty access goes through this backend — the process-isolation seam.
+// Today it runs node-pty in-process (identical behaviour to before); Phase 2
+// swaps in a utilityProcess-backed implementation so a conpty.node heap
+// corruption can't take down the app. Data/exit events arrive tagged by agentId
+// and are dispatched to the owning session's handlers; the backend only ever
+// surfaces events from the CURRENT proc for an agentId, so a replaced session's
+// old handle can't feed or tear down the fresh one.
+const backend = new LocalPtyBackend();
+backend.setOnData((agentId, data) => sessions.get(agentId)?.handleData?.(data));
+backend.setOnExit((agentId, ev) => sessions.get(agentId)?.handleExit?.(ev));
 
 // --- PTY event bus for spawn/exit notifications ---
 //
@@ -164,7 +178,7 @@ export function spawnAgent(
     // Tearing down a ConPTY: open the guard window so a resize doesn't race
     // the teardown (the same heap-corruption class as spawn-vs-resize).
     markLifecycle();
-    existing.proc.kill();
+    backend.kill(args.agentId);
     sessions.delete(args.agentId);
     // Drop any stale scheduler state for this agentId before the fresh spawn
     // re-registers it (the replaced session's async onExit will early-return).
@@ -267,16 +281,7 @@ export function spawnAgent(
     spawnArgs = args.args;
   }
 
-  const proc = pty.spawn(spawnCommand, spawnArgs, {
-    name: 'xterm-256color',
-    cols: args.cols,
-    rows: args.rows,
-    cwd: args.dockerMode ? undefined : cwd,
-    env: args.dockerMode ? filteredEnv : spawnEnv,
-  });
-
   const session: PtySession = {
-    proc,
     channelId,
     taskId: args.taskId,
     agentId: args.agentId,
@@ -351,7 +356,7 @@ export function spawnAgent(
     }
   };
 
-  proc.onData((data: string) => {
+  session.handleData = (data: string) => {
     const chunk = Buffer.from(data, 'utf8');
 
     // A heavy read means this PTY is bursting — let the scheduler decide whether
@@ -388,9 +393,9 @@ export function spawnAgent(
     if (!session.flushTimer) {
       session.flushTimer = setTimeout(flush, BATCH_INTERVAL);
     }
-  });
+  };
 
-  proc.onExit(({ exitCode, signal }) => {
+  session.handleExit = ({ exitCode, signal }: PtyExitEvent) => {
     // Mark exited FIRST (before any early return) so resize/write guards stop
     // touching the dead native handle — even for a session that was already
     // replaced by a newer spawn under the same agentId.
@@ -432,6 +437,19 @@ export function spawnAgent(
     // Free the scheduler's reference so it never resumes a dead pipe and hands
     // the drain token on to a live sibling if this one held it.
     unregisterDrainControl(args.agentId);
+  };
+
+  // Handlers are wired and the session is in the map — now start the native pty
+  // through the seam. The backend tags data/exit with this agentId; the global
+  // dispatch above routes them to session.handleData/handleExit.
+  backend.spawn({
+    agentId: args.agentId,
+    command: spawnCommand,
+    args: spawnArgs,
+    cwd: args.dockerMode ? undefined : cwd,
+    env: args.dockerMode ? filteredEnv : spawnEnv,
+    cols: args.cols,
+    rows: args.rows,
   });
 
   emitPtyEvent('spawn', args.agentId);
@@ -479,7 +497,7 @@ export function writeToAgent(agentId: string, data: string): void {
   // Writing to an exited PTY touches a freed native handle — skip silently
   // (the tile is on its way out; the bytes have nowhere to go).
   if (session.exited) return;
-  session.proc.write(data);
+  backend.write(agentId, data);
 }
 
 /** Clamp a proposed terminal dimension to a sane positive integer. node-pty's
@@ -545,7 +563,7 @@ function drainDeferredResizes(): void {
   const session = sessions.get(agentId);
   if (session && !session.exited) {
     try {
-      session.proc.resize(dims.cols, dims.rows);
+      backend.resize(agentId, dims.cols, dims.rows);
     } catch (err) {
       console.warn(`[pty] deferred resize(${dims.cols}, ${dims.rows}) failed for ${agentId}:`, err);
     }
@@ -580,7 +598,7 @@ export function resizeAgent(agentId: string, cols: number, rows: number): void {
   // resize a closed pty"); it does NOT catch native heap corruption — the
   // exited/dim guards above are what prevent that.
   try {
-    session.proc.resize(c, r);
+    backend.resize(agentId, c, r);
   } catch (err) {
     console.warn(`[pty] resize(${c}, ${r}) failed for ${agentId}:`, err);
   }
@@ -595,8 +613,8 @@ function applyPauseState(session: PtySession): void {
   const shouldPause = session.rendererPaused || session.schedulerPaused;
   if (shouldPause === session.nativePaused) return;
   try {
-    if (shouldPause) session.proc.pause();
-    else session.proc.resume();
+    if (shouldPause) backend.pause(session.agentId);
+    else backend.resume(session.agentId);
     session.nativePaused = shouldPause;
   } catch (err) {
     console.warn(`[pty] pause/resume failed for ${session.agentId}:`, err);
@@ -643,7 +661,7 @@ export function killAgent(agentId: string): void {
     // Free the drain token now (don't wait for the async onExit) so a sibling
     // that was paused behind this one resumes immediately.
     unregisterDrainControl(agentId);
-    session.proc.kill();
+    backend.kill(agentId);
   }
 }
 
@@ -666,7 +684,7 @@ export function killAllAgents(): void {
       }
     }
     unregisterDrainControl(session.agentId);
-    session.proc.kill();
+    backend.kill(session.agentId);
   }
   // Let onExit handlers clean up sessions individually
 }
@@ -706,8 +724,7 @@ export function getAgentMeta(
 
 /** Return the current column width of an agent's PTY. */
 export function getAgentCols(agentId: string): number {
-  const s = sessions.get(agentId);
-  return s ? s.proc.cols : 80;
+  return sessions.has(agentId) ? backend.cols(agentId) : 80;
 }
 
 // --- Docker mode helpers ---

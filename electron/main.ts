@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, session, shell } from 'electron';
+import { app, BrowserWindow, crashReporter, session, shell, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -286,6 +286,14 @@ function initPtyHostIfEnabled(): void {
     ptyHostManager = new PtyHostManager(forkPtyHostChild);
     usePtyHostBackend(ptyHostManager);
     console.warn('[pty-host] process isolation ENABLED (node-pty in utilityProcess)');
+    // E2E-only: let a test simulate a host crash to prove containment. Never
+    // registered in production (the env var is set only by the test harness).
+    if (process.env['CLAUDEDESK_E2E'] === '1') {
+      ipcMain.handle('__pty_host_crash_test', () => {
+        ptyHostManager?.crashForTest();
+        return true;
+      });
+    }
   } catch (err) {
     console.error('[pty-host] failed to start; falling back to in-process node-pty:', err);
     ptyHostManager = null;

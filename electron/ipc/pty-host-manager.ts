@@ -58,6 +58,9 @@ export class PtyHostManager implements MessageTransport {
     const dead = [...this.live];
     this.live.clear();
     this.restarts += 1;
+    console.warn(
+      `[pty-host] host child exited unexpectedly — contained; reporting ${dead.length} terminal(s) as exited and restarting (restart #${this.restarts})`,
+    );
     for (const agentId of dead) {
       this.mainCb({ type: 'exit', agentId, exitCode: -1 });
     }
@@ -77,6 +80,13 @@ export class PtyHostManager implements MessageTransport {
   /** Intentional shutdown (app quit): kill the child and do NOT restart it. */
   shutdown(): void {
     this.shuttingDown = true;
+    this.child.kill();
+  }
+
+  /** TEST-ONLY: kill the host child WITHOUT the shutdown flag, so its exit runs
+   *  the crash path (synthesize exits + restart). Lets an e2e prove real
+   *  containment by simulating a host crash. */
+  crashForTest(): void {
     this.child.kill();
   }
 }

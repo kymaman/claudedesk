@@ -158,6 +158,17 @@ const ALLOWED_CHANNELS = new Set([
 ]);
 
 function isAllowedChannel(channel) {
+  // E2E-only PTY-host crash hook. Double-gated: the main-process handler is only
+  // registered when CLAUDEDESK_E2E=1, and the channel is only permitted here in
+  // that same mode, so it cannot be reached in a normal build.
+  if (
+    channel === '__pty_host_crash_test' &&
+    typeof process !== 'undefined' &&
+    process.env &&
+    process.env.CLAUDEDESK_E2E === '1'
+  ) {
+    return true;
+  }
   return ALLOWED_CHANNELS.has(channel) || channel.startsWith('channel:');
 }
 

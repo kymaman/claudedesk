@@ -3,6 +3,7 @@ import { Terminal, type IMarker } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { attachSelfHealingWebgl, type WebglRendererHandle } from '../lib/webgl-renderer';
 import { invoke, fireAndForget, Channel } from '../lib/ipc';
 import { IPC } from '../../electron/ipc/channels';
 import { getTerminalFontFamily } from '../lib/fonts';
@@ -111,7 +112,10 @@ export function TerminalView(props: TerminalViewProps) {
   let containerRef!: HTMLDivElement;
   let term: Terminal | undefined;
   let fitAddon: FitAddon | undefined;
-  let webglAddon: WebglAddon | undefined;
+  let webglHandle: WebglRendererHandle | undefined;
+  // Listener that repaints this terminal when the window comes back to the
+  // foreground / the machine wakes — the "каша" safety net (see below).
+  let onVisible: (() => void) | undefined;
 
   // A claude (non-shell) terminal: it repaints in place and has no usable
   // xterm scrollback, but it DOES scroll its own transcript on PageUp/PageDown
@@ -918,17 +922,32 @@ export function TerminalView(props: TerminalViewProps) {
       }
     });
 
-    // Load WebGL addon for all terminals. On context loss (e.g. too many
-    // WebGL contexts), the terminal gracefully falls back to the DOM renderer.
-    try {
-      webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        webglAddon?.dispose();
-        webglAddon = undefined;
-      });
-      term.loadAddon(webglAddon);
-    } catch {
-      // WebGL2 not supported — DOM renderer used automatically
+    // Self-healing WebGL renderer. On context loss — which Chromium triggers
+    // when the GPU powers down during idle, or when the ~16-context cap is hit
+    // — the old code merely disposed the addon, leaving the dead <canvas>
+    // frozen on its last frame while new output painted over it via the DOM
+    // renderer ("каша" / stale-frame overlap, seen after the machine sat
+    // idle). attachSelfHealingWebgl recreates the WebGL renderer (the context
+    // is normally back after wake, keeping the terminal fast) and, on
+    // permanent failure, forces a full repaint so no dead frame survives.
+    // See lib/webgl-renderer.ts (unit-tested).
+    webglHandle = attachSelfHealingWebgl(term, () => new WebglAddon());
+
+    // Belt-and-braces for the same "каша": when the window returns to the
+    // foreground (tab re-shown, machine woken), force a full repaint even if
+    // no onContextLoss fired — a stale frame can survive a sleep without a
+    // formal context-loss event. visibilitychange covers the common cases
+    // without an Electron powerMonitor IPC round-trip.
+    if (typeof document !== 'undefined') {
+      onVisible = (): void => {
+        if (document.visibilityState !== 'visible') return;
+        try {
+          term?.refresh(0, (term?.rows ?? 1) - 1);
+        } catch {
+          /* term disposed */
+        }
+      };
+      document.addEventListener('visibilitychange', onVisible);
     }
 
     // Merge global Terminal Defaults (from Agents view) with task-specific props.
@@ -1082,8 +1101,12 @@ export function TerminalView(props: TerminalViewProps) {
       if (whisperFlushInterval !== undefined) clearInterval(whisperFlushInterval);
       onOutput.cleanup?.();
       offBridge();
-      webglAddon?.dispose();
-      webglAddon = undefined;
+      if (onVisible && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+        onVisible = undefined;
+      }
+      webglHandle?.dispose();
+      webglHandle = undefined;
       unregisterTerminal(agentId);
       // kill_agent already clears paused flag before killing
       fireAndForget(IPC.KillAgent, { agentId });

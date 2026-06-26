@@ -808,6 +808,16 @@ export async function summarizeChat(chatId: string): Promise<string | null> {
 const PERSIST_KEY = 'claudedesk.openChats';
 const MAX_PERSISTED = 20;
 
+/**
+ * Delay between restoring consecutive persisted chats on startup. Staggering
+ * avoids a synchronous burst of `claude --resume` spawns — a CPU/disk spike
+ * that also races the PTY host (the mass-start crash trigger) and, with many
+ * tiles, blows past the browser's ~16 WebGL-context cap so xterm falls back to
+ * its slow DOM renderer (the "rendering suffers on startup" report). Exported
+ * so tests can drive fake timers deterministically.
+ */
+export const RESTORE_STAGGER_MS = 450;
+
 interface PersistedChat {
   id: string;
   sessionId?: string;
@@ -948,11 +958,11 @@ export function restoreOpenChats(): void {
     if (typeof ai === 'number' && typeof bi === 'number') return ai - bi;
     return a.lastActiveAt - b.lastActiveAt;
   });
-  // Pick the most-recently-active chat to focus after the loop. The loop
-  // itself sets active on each open, but we override at the end so grid
-  // order isn't tied to "which one we want focused".
+  // Pick the most-recently-active chat to focus at the end. Each open sets
+  // active, but we override after the last spawn so grid order isn't tied
+  // to "which one we want focused".
   const mruId = [...list].sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0]?.id;
-  for (const p of list) {
+  const restoreOne = (p: PersistedChat): void => {
     const settings: ChatLaunchSettings = {
       agentId: p.agentDefId,
       extraFlags: p.extraFlags ?? [],
@@ -1013,18 +1023,36 @@ export function restoreOpenChats(): void {
         ),
       );
     }
-  }
+  };
   // Restore focus to the most-recently-used chat — independent of grid
   // order. openFreshChat preserves the persisted id; openChatFromSession
   // mints a new chat id but carries sessionId forward, so we look up
   // restored chats by whichever key the persisted record had.
-  const mru = list.find((p) => p.id === mruId);
-  if (mru) {
+  const finishFocus = (): void => {
+    const mru = list.find((p) => p.id === mruId);
+    if (!mru) return;
     const restored = _chats().find((c) => {
       if (c.closed) return false;
       if (mru.sessionId) return c.sessionId === mru.sessionId;
       return c.id === mru.id;
     });
     if (restored) setActiveChatId(restored.id);
+  };
+
+  // Stagger the spawns (see RESTORE_STAGGER_MS). Open the first tile
+  // immediately for instant feedback, then drip the rest one at a time so the
+  // startup spawn burst is spread out instead of hammering CPU/PTY/WebGL all
+  // at once.
+  restoreOne(list[0]);
+  if (list.length === 1) {
+    finishFocus();
+    return;
+  }
+  for (let i = 1; i < list.length; i++) {
+    const p = list[i];
+    setTimeout(() => {
+      restoreOne(p);
+      if (i === list.length - 1) finishFocus();
+    }, i * RESTORE_STAGGER_MS);
   }
 }

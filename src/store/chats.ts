@@ -962,6 +962,15 @@ export function restoreOpenChats(): void {
   // active, but we override after the last spawn so grid order isn't tied
   // to "which one we want focused".
   const mruId = [...list].sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0]?.id;
+  // Session ids already taken by a tile restored EARLIER in this pass. A fork
+  // tile whose persisted session id collides with one of these must NOT plain
+  // --resume it: openChatFromSession would dedup onto the sibling and the
+  // branch would either vanish (merged) or glue onto the same live session —
+  // the "сделал бранч, перезапустил, в обе плитки подгрузился один и тот же
+  // старый чат" bug. Such a fork is re-forked instead so it gets its OWN
+  // divergent session. Tracked across the staggered setTimeout callbacks via
+  // this closure.
+  const claimedSessionIds = new Set<string>();
   const restoreOne = (p: PersistedChat): void => {
     const settings: ChatLaunchSettings = {
       agentId: p.agentDefId,
@@ -981,20 +990,29 @@ export function restoreOpenChats(): void {
         filePath: '',
         folderIds: [],
       };
-      if (p.forkParent && p.sessionId === p.forkParent.sessionId) {
-        // An undiverged branch: it never wrote its own JSONL (the user
-        // didn't send a message before quitting), so it still shares the
-        // parent's session id. A plain --resume would dedup onto the
-        // restored parent tile and the branch would vanish — the "my
-        // branch disappeared after reopen" bug. Re-fork it instead so it
-        // comes back as a SEPARATE dialog (bypasses dedup, keeps
-        // --fork-session).
+      // Undiverged branch: never wrote its own JSONL (no message sent before
+      // quit), so it still carries the parent's session id verbatim.
+      const isUndivergedBranch = p.sessionId === p.forkParent?.sessionId;
+      // Collision: a sibling tile restored earlier in THIS pass already owns
+      // this session id (e.g. parent + branch both got advanced onto the same
+      // continuation before the restart — the glue had already started).
+      const collidesWithSibling = claimedSessionIds.has(p.sessionId);
+      if (p.forkParent && (isUndivergedBranch || collidesWithSibling)) {
+        // Re-fork instead of --resume: bypasses the openChatFromSession dedup
+        // and keeps --fork-session, so the branch comes back as a SEPARATE
+        // dialog and watchLiveSession splits it onto its own divergent
+        // session id. Without this it would merge onto / glue with the
+        // sibling that already claimed this id.
         // This restore path only handles non-project (global) chats, so
         // the workspace is always null.
         restoredChat = branchChatFromSession(fakeSession, settings, { projectId: null });
       } else {
         restoredChat = openChatFromSession(fakeSession, settings);
       }
+      // Record both the persisted id and whatever id the restored tile now
+      // carries, so the NEXT tile in the pass sees this session as taken.
+      claimedSessionIds.add(p.sessionId);
+      if (restoredChat?.sessionId) claimedSessionIds.add(restoredChat.sessionId);
     } else {
       restoredChat = openFreshChat({
         id: p.id,

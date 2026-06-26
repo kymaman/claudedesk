@@ -133,7 +133,7 @@ describe('restore: a re-forked branch never glues onto the parent continuation',
     const m = await importChats();
     localStorage.setItem('claudedesk.openChats', JSON.stringify(SNAPSHOT));
 
-    m.restoreOpenChats();
+    m.restoreOpenChats({ staggerMs: 0 });
     await flush();
 
     const open = m.openChats();
@@ -153,7 +153,7 @@ describe('restore: a re-forked branch never glues onto the parent continuation',
     const m = await importChats();
     localStorage.setItem('claudedesk.openChats', JSON.stringify(SNAPSHOT));
 
-    m.restoreOpenChats();
+    m.restoreOpenChats({ staggerMs: 0 });
     await flush();
 
     const open = m.openChats();

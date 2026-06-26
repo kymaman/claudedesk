@@ -923,7 +923,13 @@ if (typeof window !== 'undefined') {
  * are re-spawned via openFreshChat — they lose conversation history but
  * the workspace shape (cwd, agent, flags) is preserved.
  */
-export function restoreOpenChats(): void {
+export function restoreOpenChats(opts?: { staggerMs?: number }): void {
+  // Interval between consecutive tile spawns. Defaults to RESTORE_STAGGER_MS
+  // in production; tests inject 0 so every tile is scheduled in the same tick
+  // (still async — drained by a microtask flush) instead of waiting real
+  // wall-clock seconds. Grid order is preserved either way: same-delay
+  // setTimeout callbacks fire in registration (gridIndex) order.
+  const staggerMs = opts?.staggerMs ?? RESTORE_STAGGER_MS;
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(PERSIST_KEY);
@@ -1071,6 +1077,6 @@ export function restoreOpenChats(): void {
     setTimeout(() => {
       restoreOne(p);
       if (i === list.length - 1) finishFocus();
-    }, i * RESTORE_STAGGER_MS);
+    }, i * staggerMs);
   }
 }

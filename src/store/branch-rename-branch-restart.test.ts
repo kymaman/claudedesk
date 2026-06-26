@@ -140,7 +140,8 @@ describe('branch → rename → branch → restart keeps every branch (global zo
     // 6. reopen — fresh module instance, same localStorage
     m = await importChats();
     expect(m.openChats().length, 'no tiles before restore').toBe(0);
-    m.restoreOpenChats();
+    // staggerMs:0 → all tiles scheduled in one tick (still async); flush drains.
+    m.restoreOpenChats({ staggerMs: 0 });
     await flush();
 
     const open = m.openChats();

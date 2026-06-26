@@ -116,7 +116,10 @@ describe('restoreOpenChats — bug #34 grid order preserved', () => {
     m.flushPersistOpenChatsForTest();
 
     m = await importChats();
-    m.restoreOpenChats();
+    // staggerMs:0 schedules all tiles in one tick (still async); drain before
+    // asserting the full restored order.
+    m.restoreOpenChats({ staggerMs: 0 });
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0));
     const titles = m.openChats().map((x) => x.title);
     expect(titles).toEqual(['A-first', 'B-second', 'C-third']);
   });
@@ -175,7 +178,8 @@ describe('restoreOpenChats — bug #34 grid order preserved', () => {
     ];
     localStorage.setItem('claudedesk.openChats', JSON.stringify(legacy));
     const m = await importChats();
-    m.restoreOpenChats();
+    m.restoreOpenChats({ staggerMs: 0 });
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0));
     expect(m.openChats().map((c) => c.title)).toEqual(['oldest', 'mid', 'newest']);
   });
 });

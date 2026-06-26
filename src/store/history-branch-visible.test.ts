@@ -148,7 +148,10 @@ describe('branch shows in History immediately + survives restart', () => {
     ];
     localStorage.setItem('claudedesk.openChats', JSON.stringify(snapshot));
 
-    chats.restoreOpenChats();
+    // staggerMs:0 schedules the 2nd tile in the same tick (still async);
+    // drain a few macrotasks so it spawns before we assert.
+    chats.restoreOpenChats({ staggerMs: 0 });
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0));
 
     const open = chats.openChats();
     // BOTH the parent and the branch must come back — not collapsed to one.

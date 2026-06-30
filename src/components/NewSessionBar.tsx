@@ -38,12 +38,18 @@ export function NewSessionBar() {
         .map((s) => s.trim())
         .filter(Boolean);
       // Empty cwd → pty falls back to the user's home dir (see electron/ipc/pty.ts).
+      // A name the user actually typed is flagged as a user title so
+      // openFreshChat registers it as an override that WINS over claude's
+      // auto first-message title (and persists as the alias once a session
+      // binds). No name → default 'New chat' with NO override, so the chat
+      // still adopts the nicer auto disk title.
+      const typed = title().trim();
       openFreshChat({
         cwd: cwd().trim(),
         agentId: agentId(),
         extraFlags,
         skipPermissions: skipPerms(),
-        title: title().trim() || 'New chat',
+        ...(typed ? { title: typed, titleIsUserTitle: true } : {}),
       });
       reset();
       setOpen(false);

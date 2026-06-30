@@ -288,6 +288,7 @@ function buildChat(params: {
   _setActiveChatId(chat.id);
   schedulePersistOpenChats();
   if (chat.sessionId) watchLiveSession(chat.id);
+  else watchFreshSession(chat.id);
   return chat;
 }
 
@@ -419,6 +420,68 @@ function adoptLiveSessionId(chatId: string, fromSid: string, liveSid: string): v
   }
 }
 
+/**
+ * Watch a FRESH tile (opened without a --resume seed) for the session
+ * claude mints once the user sends a first message, and adopt that id.
+ *
+ * Without this, a brand-new chat NEVER learns its on-disk session id
+ * (watchLiveSession above is gated on already HAVING a sessionId), so on
+ * the next app restart it spawns a blank claude instead of resuming —
+ * the «последние диалоги открылись как новые чаты» bug. The main process
+ * matches by cwd + freshness + real content, excluding ids sibling tiles
+ * already own, so a fresh chat only ever adopts ITS OWN new session.
+ */
+function watchFreshSession(chatId: string): void {
+  if (typeof window === 'undefined') return;
+  const chat = _chats().find((c) => c.id === chatId);
+  if (!chat || chat.sessionId) return;
+  const sinceMs = Date.now() - 5_000;
+  invoke<{ sessionId: string | null; changed: boolean }>(IPC.ResolveFreshSession, {
+    cwd: chat.cwd ?? '',
+    sinceMs,
+    waitMs: LIVE_WATCH_MS,
+    excludeSessionIds: siblingSessionIds(chatId),
+  })
+    .then((res) => {
+      if (res?.changed && res.sessionId) adoptFreshSessionId(chatId, res.sessionId);
+    })
+    .catch((err) => {
+      console.warn('[chats] watch fresh session failed:', err);
+    });
+}
+
+/**
+ * Fill a fresh tile's EMPTY session slot with the id claude minted, then
+ * hand off to watchLiveSession so future resume-continuations are tracked
+ * exactly like any resumed tile. Never overwrites a non-empty slot and
+ * never steals an id a peer already owns.
+ */
+function adoptFreshSessionId(chatId: string, liveSid: string): void {
+  const cur = _chats().find((c) => c.id === chatId);
+  if (!cur || cur.closed || cur.sessionId) return; // only fill an empty slot
+  const takenByPeer = _chats().some(
+    (c) =>
+      c.id !== chatId &&
+      !c.closed &&
+      (c.sessionId === liveSid || (c.pastSessionIds?.includes(liveSid) ?? false)),
+  );
+  if (takenByPeer) return;
+  _setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, sessionId: liveSid } : c)));
+  schedulePersistOpenChats();
+  // If the user named this fresh chat before it had a sessionId (override set
+  // at creation in openFreshChat, or a later rename), persist that name as the
+  // session ALIAS now that a real session exists. This survives restart and
+  // makes the IPC's disk title (alias ?? cached.title) keep the user's name
+  // instead of claude's first-message text — mirrors renameChat's alias write.
+  const override = _titleOverrides().get(chatId);
+  if (override && typeof window !== 'undefined') {
+    invoke(IPC.RenameClaudeSession, { sessionId: liveSid, alias: override }).catch((err) => {
+      console.warn('[chats] persist fresh-chat alias on bind failed:', err);
+    });
+  }
+  watchLiveSession(chatId);
+}
+
 export function openChatFromSession(
   session: SessionItem,
   settings: ChatLaunchSettings,
@@ -505,6 +568,16 @@ export function openFreshChat(params: {
   extraFlags?: string[];
   skipPermissions?: boolean;
   title?: string;
+  /**
+   * True when `title` is a name the USER actually typed at creation (e.g. in
+   * NewSessionBar) — as opposed to a default ('New chat') or a restored title.
+   * A user-typed name is registered as a title OVERRIDE so it WINS over the
+   * auto first-message/AI disk title that claude derives later (otherwise it
+   * lives only in `chat.title`, the lowest precedence tier, and "disappears"
+   * once `_diskTitles` is fed). Default/empty titles get NO override, so
+   * unnamed chats still pick up the nicer auto disk title.
+   */
+  titleIsUserTitle?: boolean;
   projectId?: string | null;
 }): Chat | null {
   const baseAgent = resolveAgent(params.agentId ?? 'claude-opus-4-8');
@@ -528,7 +601,7 @@ export function openFreshChat(params: {
     extraFlags: params.extraFlags ?? [],
     skipPermissions: params.skipPermissions ?? false,
   };
-  return buildChat({
+  const chat = buildChat({
     id: params.id ?? crypto.randomUUID(),
     title: params.title ?? 'New chat',
     cwd: params.cwd,
@@ -537,6 +610,21 @@ export function openFreshChat(params: {
     settings,
     projectId: params.projectId ?? null,
   });
+  // A user-typed name at creation must WIN over the auto disk title claude
+  // derives later (which lands in _diskTitles). chat.title is the LOWEST
+  // precedence tier in titleFor, so also register the name as an OVERRIDE —
+  // the same map renameChat uses. The alias is persisted once the chat binds
+  // a sessionId (see adoptFreshSessionId). Skip empty/default titles so
+  // unnamed chats still get the nicer auto disk title.
+  const userTitle = params.titleIsUserTitle ? params.title?.trim() : undefined;
+  if (chat && userTitle) {
+    _setTitleOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(chat.id, userTitle);
+      return next;
+    });
+  }
+  return chat;
 }
 
 /**

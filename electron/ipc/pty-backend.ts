@@ -1,4 +1,37 @@
 import * as pty from 'node-pty';
+import { spawn as spawnChild } from 'child_process';
+
+/**
+ * Reap the WHOLE process tree rooted at `pid`. node-pty's IPty.kill()
+ * signals the immediate pty process, but on Windows ConPTY the spawned
+ * agent (claude) and any grandchildren it forked (node helpers, MCP
+ * servers) can outlive it, and the conhost.exe pseudoconsole host is only
+ * released once the tree is gone. Left unreaped these pile up over uptime
+ * — the «125 conhost / приложение лагает» leak that only a reboot cleared.
+ * taskkill /T walks and force-kills the entire tree. Best-effort: a dead
+ * pid or a race just yields a non-zero exit we ignore.
+ */
+export function defaultKillTree(pid: number): void {
+  if (!pid || pid <= 0) return;
+  try {
+    if (process.platform === 'win32') {
+      const p = spawnChild('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      p.on('error', () => {});
+    } else {
+      // POSIX: node-pty already kills the process group; this is a backstop.
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        /* group already gone */
+      }
+    }
+  } catch {
+    /* never let cleanup throw into the caller */
+  }
+}
 
 // --- The PTY backend seam (process-isolation Phase 1) ---
 //
@@ -66,7 +99,10 @@ export class LocalPtyBackend implements PtyBackend {
   private onData: (agentId: string, data: string) => void = () => {};
   private onExit: (agentId: string, ev: PtyExitEvent) => void = () => {};
 
-  constructor(private readonly spawnFn: PtySpawnFn = pty.spawn) {}
+  constructor(
+    private readonly spawnFn: PtySpawnFn = pty.spawn,
+    private readonly killTree: (pid: number) => void = defaultKillTree,
+  ) {}
 
   setOnData(cb: (agentId: string, data: string) => void): void {
     this.onData = cb;
@@ -117,7 +153,14 @@ export class LocalPtyBackend implements PtyBackend {
   }
 
   kill(agentId: string): void {
-    this.procs.get(agentId)?.kill();
+    const proc = this.procs.get(agentId);
+    if (!proc) return;
+    const pid = proc.pid;
+    proc.kill();
+    // Backstop: reap claude + any grandchildren + the conhost host so they
+    // don't accumulate over uptime. onExit (registered in spawn) clears the
+    // map entry when the pty process actually dies.
+    if (typeof pid === 'number') this.killTree(pid);
   }
 
   cols(agentId: string): number {

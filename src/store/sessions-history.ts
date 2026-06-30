@@ -13,7 +13,7 @@
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { filterState } from './session-filters';
 import { hiddenSessions } from './session-hide';
-import { openChats, titleFor, titleOverrideFor } from './chats';
+import { openChats, titleFor } from './chats';
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from electron/ipc/session-history.ts)
@@ -136,14 +136,18 @@ function sessionsWithOpenChats(): SessionItem[] {
   const disk = sessions();
   const known = new Set(disk.map((s) => s.sessionId));
 
-  // Map sessionId → the user's MANUAL rename override (if any). We
-  // overlay this onto the matching disk session so History display AND
-  // search use the title the user actually gave the tile — otherwise a
-  // tile renamed "миграция HH" stays findable only by its stale
-  // first-message title, and searching "HH" misses it entirely. We use
-  // the override (not the base title) so a non-renamed open chat still
-  // lets the freshly-parsed disk title win.
-  const renameById = new Map<string, string>();
+  // Map sessionId → the open tile's RESOLVED title (titleFor). We overlay
+  // this onto the matching disk session so the History row renders the EXACT
+  // SAME text the tile header shows — title parity, «название слева в истории
+  // и сверху над терминалом — одни задачи». titleFor already encodes the
+  // canonical precedence (manual override ?? live disk/alias title ??
+  // base) and is the SAME function the tile (ChatsGrid) and chip
+  // (TopSwitcher) render through, so the row and the tile can never drift:
+  // they read one resolver, not two chains that merely happen to agree.
+  // (Previously this overlaid only the manual override, leaving the disk
+  // row on `s.title` while the tile resolved through `_diskTitles`/base —
+  // a second, parallel precedence chain that could diverge.)
+  const tileTitleById = new Map<string, string>();
   // sessionId → ISO datetime the chat tile was opened. Overlaid onto the
   // matching disk session's date so OPENING a chat bumps it to the top
   // of the "newest" sort IMMEDIATELY (openChats() is reactive) — not
@@ -153,7 +157,6 @@ function sessionsWithOpenChats(): SessionItem[] {
   const ephemeral: SessionItem[] = [];
   for (const c of openChats()) {
     if (!c.sessionId) continue;
-    const override = titleOverrideFor(c.id);
     const openedAt = new Date(c.createdAt).toISOString();
 
     // A freshly-branched tile shares its PARENT's sessionId until claude
@@ -177,8 +180,11 @@ function sessionsWithOpenChats(): SessionItem[] {
       continue;
     }
 
-    if (override) renameById.set(c.sessionId, override);
     if (known.has(c.sessionId)) {
+      // The disk row for an open chat must render through titleFor — the
+      // exact resolver the tile uses — so the two are identical by
+      // construction (not just when _diskTitles happens to equal s.title).
+      tileTitleById.set(c.sessionId, titleFor(c));
       openedAtById.set(c.sessionId, openedAt);
       continue;
     }
@@ -197,18 +203,19 @@ function sessionsWithOpenChats(): SessionItem[] {
     });
   }
 
-  // Overlay manual renames + open-bump dates onto on-disk sessions.
+  // Overlay open tiles' resolved titles (titleFor) + open-bump dates onto
+  // on-disk sessions, so each row matches its tile header exactly.
   const overlaid =
-    renameById.size === 0 && openedAtById.size === 0
+    tileTitleById.size === 0 && openedAtById.size === 0
       ? disk
       : disk.map((s) => {
-          const t = renameById.get(s.sessionId);
+          const tileTitle = tileTitleById.get(s.sessionId);
           const openedAt = openedAtById.get(s.sessionId);
           // Bump only forward in time — an old still-open tile must not
           // sink a session that something updated more recently.
           const date = openedAt && openedAt > s.date ? openedAt : s.date;
-          if ((!t || t === s.title) && date === s.date) return s;
-          return { ...s, title: t ?? s.title, date };
+          if ((tileTitle === undefined || tileTitle === s.title) && date === s.date) return s;
+          return { ...s, title: tileTitle ?? s.title, date };
         });
 
   return ephemeral.length === 0 ? overlaid : [...overlaid, ...ephemeral];

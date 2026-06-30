@@ -31,6 +31,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import readline from 'readline';
 import { getClaudeProjectsDir } from '../paths.js';
@@ -410,6 +411,118 @@ export async function resolveLiveSessionId(opts: {
       if (ok) return { sessionId: c.id, changed: true };
     }
     if (Date.now() >= deadline) return { sessionId: opts.sessionId, changed: false };
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+}
+
+/** Normalise a path for cross-file cwd comparison (Windows is
+ *  case-insensitive and mixes slashes; trailing separators vary). */
+export function normalizeCwd(cwd: string | null | undefined): string {
+  if (!cwd) return '';
+  return cwd.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Cheap head probe of a session file: the cwd it was launched in and
+ * whether it carries at least one real user message. Reads only the
+ * first window — claude writes its system/cwd lines and the first user
+ * turn at the very top. An aborted/empty session (only system/mode/
+ * bridge lines, no user turn) returns { hasUser: false } so we never
+ * adopt a blank shell as a tile's live session.
+ */
+export function sessionHeadInfo(filePath: string): { cwd: string | null; hasUser: boolean } {
+  let fd: number | null = null;
+  let cwd: string | null = null;
+  let hasUser = false;
+  try {
+    const size = fs.statSync(filePath).size;
+    const window = Math.min(size, 64 * 1024);
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(window);
+    fs.readSync(fd, buf, 0, window, 0);
+    const lines = buf.toString('utf-8').split('\n');
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      let r: { type?: unknown; cwd?: unknown; message?: { role?: unknown; content?: unknown } };
+      try {
+        r = JSON.parse(line);
+      } catch {
+        continue; // last line of the window may be cut mid-record
+      }
+      if (cwd === null && typeof r.cwd === 'string' && r.cwd) cwd = r.cwd;
+      if (!hasUser && r.type === 'user' && r.message?.role === 'user') {
+        const c = r.message.content;
+        if (typeof c === 'string' && c.trim()) hasUser = true;
+        else if (Array.isArray(c) && c.some((b) => (b as { type?: string })?.type === 'text'))
+          hasUser = true;
+      }
+      if (cwd !== null && hasUser) break;
+    }
+  } catch {
+    /* unreadable — treated as no info */
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+  return { cwd, hasUser };
+}
+
+/**
+ * Find the live session id for a FRESH tile — one opened WITHOUT a
+ * --resume seed (openFreshChat). Such a tile has no anchor uuid, so
+ * resolveLiveSessionId can't help: claude mints a brand-new session
+ * file the moment the user sends the first message, and the tile must
+ * learn that id or it restores as a blank claude after a restart (the
+ * «4 диалога открылись как новые чаты» bug).
+ *
+ * We match by (cwd + freshness + real content), excluding ids sibling
+ * tiles already own:
+ *   - the file's recorded cwd must equal the tile's cwd (so a fresh
+ *     chat in folder X never adopts a session born in folder Y, nor a
+ *     background/Paperclip agent's session);
+ *   - mtime >= sinceMs (born after the tile launched);
+ *   - it carries a real user message (not an empty aborted shell);
+ *   - its id is not claimed by another open tile.
+ * Newest qualifying file wins. waitMs>0 polls every 2s until found.
+ */
+export async function resolveFreshSessionId(opts: {
+  cwd: string;
+  sinceMs: number;
+  waitMs?: number;
+  projectsDir?: string;
+  homeDir?: string;
+  excludeSessionIds?: string[];
+}): Promise<{ sessionId: string | null; changed: boolean }> {
+  const root = opts.projectsDir ?? getClaudeProjectsDir();
+  // Empty cwd → the tile launched with no folder, and pty.ts falls back to
+  // the user's home dir, so claude wrote its session there. Match against
+  // home so home-default tiles (exactly the «cross posting» case) still bind.
+  const wantCwd = normalizeCwd(opts.cwd || (opts.homeDir ?? os.homedir()));
+  const excluded = new Set(opts.excludeSessionIds ?? []);
+  const deadline = Date.now() + Math.max(0, opts.waitMs ?? 0);
+
+  for (;;) {
+    const candidates: Array<{ id: string; f: string; mtime: number }> = [];
+    for (const f of listJsonlFiles(root)) {
+      const id = path.basename(f).replace(/\.jsonl$/i, '');
+      if (!UUID_RE.test(id) || excluded.has(id)) continue;
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(f);
+      } catch {
+        continue;
+      }
+      if (st.mtimeMs < opts.sinceMs) continue;
+      candidates.push({ id, f, mtime: st.mtimeMs });
+    }
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    for (const c of candidates) {
+      const info = sessionHeadInfo(c.f);
+      if (!info.hasUser) continue;
+      if (normalizeCwd(info.cwd) !== wantCwd) continue;
+      return { sessionId: c.id, changed: true };
+    }
+    if (Date.now() >= deadline) return { sessionId: null, changed: false };
     await new Promise((r) => setTimeout(r, 2_000));
   }
 }

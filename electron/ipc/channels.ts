@@ -144,6 +144,7 @@ export enum IPC {
 
   // Session lineage / family tree
   ResolveLiveSession = 'resolve_live_session',
+  ResolveFreshSession = 'resolve_fresh_session',
   ListSessionTree = 'list_session_tree',
   RecordSessionLineage = 'record_session_lineage',
 

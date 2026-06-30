@@ -157,3 +157,33 @@ describe('LocalPtyBackend', () => {
     expect(data).toEqual(['a:live']);
   });
 });
+
+describe('LocalPtyBackend — kill reaps the whole process tree', () => {
+  function makePidBackend() {
+    const procs: Array<FakeProc & { pid: number }> = [];
+    let nextPid = 1000;
+    const spawnFn: PtySpawnFn = vi.fn((_cmd, _args, opts) => {
+      const p = Object.assign(makeFakeProc(opts.cols, opts.rows), { pid: (nextPid += 1) });
+      procs.push(p);
+      return p as unknown as pty.IPty;
+    });
+    const killTree = vi.fn();
+    const backend = new LocalPtyBackend(spawnFn, killTree);
+    return { backend, procs, killTree };
+  }
+
+  it('tree-kills the spawned pid so claude + conhost do not leak', () => {
+    const { backend, procs, killTree } = makePidBackend();
+    backend.spawn(baseSpawn('a'));
+    const pid = procs[0]!.pid;
+    backend.kill('a');
+    expect(procs[0]!.kill).toHaveBeenCalledTimes(1); // node-pty's own kill still fires
+    expect(killTree).toHaveBeenCalledWith(pid); // plus the tree backstop
+  });
+
+  it('killing an unknown agent does not invoke the tree killer', () => {
+    const { backend, killTree } = makePidBackend();
+    backend.kill('ghost');
+    expect(killTree).not.toHaveBeenCalled();
+  });
+});

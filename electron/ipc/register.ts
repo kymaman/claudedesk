@@ -102,7 +102,11 @@ import {
   chooseRevealTarget,
 } from './session-transcript.js';
 import { summarizeSession } from './session-summarize.js';
-import { listSessionFamilies, resolveLiveSessionId } from './session-lineage.js';
+import {
+  listSessionFamilies,
+  resolveLiveSessionId,
+  resolveFreshSessionId,
+} from './session-lineage.js';
 import { getSystemMonospaceFonts } from './system-fonts.js';
 import path from 'path';
 import {
@@ -1058,6 +1062,17 @@ export function registerAllHandlers(win: BrowserWindow): void {
       }
     }
     return res;
+  });
+
+  ipcMain.handle(IPC.ResolveFreshSession, async (_e, args) => {
+    assertString(args.cwd, 'cwd');
+    const cwd = args.cwd as string;
+    const sinceMs = typeof args?.sinceMs === 'number' ? args.sinceMs : Date.now();
+    const waitMs = typeof args?.waitMs === 'number' ? Math.min(args.waitMs, 300_000) : 0;
+    const excludeSessionIds = Array.isArray(args?.excludeSessionIds)
+      ? (args.excludeSessionIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined;
+    return resolveFreshSessionId({ cwd, sinceMs, waitMs, excludeSessionIds });
   });
 
   ipcMain.handle(IPC.ListSessionTree, () =>

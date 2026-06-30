@@ -25,6 +25,7 @@ docs/*
 /.zshrc
 
 # Playwright test artifacts
+e2e/__*.png
 test-results/
 test-results-final/
 test-results-html/

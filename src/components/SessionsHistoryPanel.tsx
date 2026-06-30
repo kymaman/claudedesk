@@ -60,6 +60,8 @@ import {
   openChats,
   branchChatFromSession,
   setActiveChatId,
+  renameChat,
+  titleFor,
 } from '../store/chats';
 import { sessionProjectMap } from '../store/chat-projects';
 import { ChatsGrid } from './ChatsGrid';
@@ -866,8 +868,27 @@ function SessionRow(props: {
     if (!editing()) return;
     const value = draft().trim();
     setEditing(false);
-    // Synthetic branch rows have no session on disk — nothing to alias.
-    if (props.session.openChatId) return;
+    if (!value) return;
+    // If this row stands in for an OPEN chat tile, route the rename through
+    // renameChat: that records the user's name as the chat's title OVERRIDE
+    // (which WINS over the auto first-message/AI disk title) AND persists it
+    // as the session alias, and makes the open tile header update live — both
+    // surfaces read titleFor. The OLD code early-returned for any row carrying
+    // an openChatId, so renaming an open (fork/ephemeral) session from History
+    // was a silent no-op. A regular open chat on disk has NO openChatId, so we
+    // also match the open chat by sessionId.
+    const openChat =
+      openChats().find((c) => c.id === props.session.openChatId) ??
+      openChats().find((c) => !c.closed && c.sessionId === props.session.sessionId);
+    if (openChat) {
+      if (value !== titleFor(openChat)) renameChat(openChat.id, value);
+      return;
+    }
+    // No open tile to target. A purely-synthetic row (a still-undiverged
+    // branch placeholder) has no JSONL on disk — `filePath` is empty — so
+    // there is nothing to alias; skip. Everything else is a real on-disk
+    // session: alias it directly.
+    if (!props.session.filePath) return;
     try {
       if (value !== props.session.title) {
         await renameSessionLocal(props.session.sessionId, value);

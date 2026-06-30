@@ -489,6 +489,87 @@ function parseSessionsIndex(): Map<string, IndexEntry> {
 }
 
 // ---------------------------------------------------------------------------
+// Paperclip session detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when any supplied path string contains a Paperclip marker.
+ *
+ * Primary check uses `filePath` (the raw .jsonl file path) because it includes
+ * the encoded folder-name — e.g.
+ *   "…\C--Users-burmistrov-potok-marketing\<uuid>.jsonl"
+ *   "…\C--Users-burmistrov--paperclip-instances-default-projects-…\<uuid>.jsonl"
+ *
+ * Fallback: cwd / projectPath for sessions whose JSONL cwd was already cached.
+ *
+ * This is a pure function with no side effects.
+ */
+export function isPaperclipSession(args: {
+  projectPath?: string | null;
+  cwd?: string | null;
+  filePath?: string | null;
+}): boolean {
+  const haystack = [args.filePath, args.cwd, args.projectPath]
+    .filter((s): s is string => typeof s === 'string')
+    .join('\0')
+    .toLowerCase();
+  return haystack.includes('potok-marketing') || haystack.includes('paperclip');
+}
+
+// ---------------------------------------------------------------------------
+// Paperclip auto-assign (internal)
+// ---------------------------------------------------------------------------
+
+/** Minimal ops interface for the auto-assign logic — injectable for unit tests. */
+export interface PaperclipFolderOps {
+  getFolderByName: (name: string) => { id: string } | null;
+  createFolderByName: (name: string) => { id: string };
+  addToFolder: (sessionId: string, folderId: string) => void;
+}
+
+/**
+ * Ensures exactly one "Paperclip" folder exists and maps all detected sessions
+ * to it.  Uses `INSERT OR IGNORE` under the hood, so re-running is safe
+ * (idempotent). Exported via `__test` with an injectable `ops` for unit testing
+ * without SQLite.
+ */
+export function autoAssignPaperclipSessions(
+  sessions: ReadonlyArray<{ sessionId: string; filePath: string }>,
+  ops: PaperclipFolderOps,
+): void {
+  const targets = sessions.filter((s) => isPaperclipSession({ filePath: s.filePath }));
+  if (targets.length === 0) return;
+
+  let folder = ops.getFolderByName('Paperclip');
+  if (!folder) {
+    folder = ops.createFolderByName('Paperclip');
+  }
+  const folderId = folder.id;
+  for (const s of targets) {
+    ops.addToFolder(s.sessionId, folderId);
+  }
+}
+
+/** Build the real-DB ops object (called once per `listSessions` invocation). */
+function makeLiveOps(): PaperclipFolderOps {
+  return {
+    getFolderByName: (name) => {
+      const db = getDb();
+      return (
+        db.prepare<[string], { id: string }>('SELECT id FROM folders WHERE name = ?').get(name) ??
+        null
+      );
+    },
+    createFolderByName: (name) => {
+      return { id: createFolder({ name }).id };
+    },
+    addToFolder: (sessionId, folderId) => {
+      addSessionToFolder({ sessionId, folderId });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Folder scanner
 // ---------------------------------------------------------------------------
 
@@ -756,6 +837,10 @@ export async function listSessions(extraFolders?: string[]): Promise<SessionItem
   // Sort newest first by mtime
   unique.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
+  // Auto-assign all Paperclip sessions to a dedicated "Paperclip" folder.
+  // Runs before the folderIds query so that newly-assigned IDs are included.
+  autoAssignPaperclipSessions(unique, makeLiveOps());
+
   // Pre-fetch folder memberships + recorded branch parents in one query each.
   const folderIdsMap = getFolderIdsForSessions(unique.map((u) => u.sessionId));
   const branchParents = getBranchParents();
@@ -894,4 +979,5 @@ export async function getSessionPreview(filePath: string): Promise<SessionPrevie
 export const __test = {
   parseJsonlSummary,
   decodeProjectPath,
+  autoAssignPaperclipSessions,
 };

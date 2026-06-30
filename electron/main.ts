@@ -10,6 +10,7 @@ import { PtyHostManager } from './ipc/pty-host-manager.js';
 import { forkPtyHostChild } from './ipc/pty-host-child.js';
 import { stopAllPlanWatchers } from './ipc/plans.js';
 import { stopAllStepsWatchers } from './ipc/steps.js';
+import { reapOrphanConhosts } from './ipc/orphan-reaper.js';
 import { IPC } from './ipc/channels.js';
 import { resolveUserShell } from './user-shell.js';
 
@@ -319,6 +320,15 @@ app.whenReady().then(() => {
   );
 
   createWindow();
+
+  // Sweep leaked conhost.exe pseudoconsole hosts orphaned by previous
+  // crashed instances (Windows ConPTY). Kills ONLY hosts whose parent is
+  // dead — never the running app's terminals. Best-effort, off the hot path.
+  reapOrphanConhosts()
+    .then((n) => {
+      if (n > 0) console.warn(`[orphan-reaper] reaped ${n} leaked conhost host(s)`);
+    })
+    .catch(() => {});
 });
 
 app.on('before-quit', () => {

@@ -1,6 +1,6 @@
 {
   "name": "claudedesk",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "Desktop app for running and switching between Claude Code sessions",
   "author": {
     "name": "ClaudeDesk",

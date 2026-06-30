@@ -13,7 +13,7 @@
 import { createRoot, createSignal, type Accessor, type Setter } from 'solid-js';
 import { filterState } from './session-filters';
 import { hiddenSessions } from './session-hide';
-import { openChats, titleFor } from './chats';
+import { openChats, titleFor, titleOverrideFor, diskTitleFor } from './chats';
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from electron/ipc/session-history.ts)
@@ -136,17 +136,20 @@ function sessionsWithOpenChats(): SessionItem[] {
   const disk = sessions();
   const known = new Set(disk.map((s) => s.sessionId));
 
-  // Map sessionId → the open tile's RESOLVED title (titleFor). We overlay
-  // this onto the matching disk session so the History row renders the EXACT
-  // SAME text the tile header shows — title parity, «название слева в истории
-  // и сверху над терминалом — одни задачи». titleFor already encodes the
-  // canonical precedence (manual override ?? live disk/alias title ??
-  // base) and is the SAME function the tile (ChatsGrid) and chip
-  // (TopSwitcher) render through, so the row and the tile can never drift:
-  // they read one resolver, not two chains that merely happen to agree.
-  // (Previously this overlaid only the manual override, leaving the disk
-  // row on `s.title` while the tile resolved through `_diskTitles`/base —
-  // a second, parallel precedence chain that could diverge.)
+  // Map sessionId → the open tile's RESOLVED title. We overlay this onto the
+  // matching disk session so the History row renders the SAME text the tile
+  // header shows — title parity, «название слева в истории и сверху над
+  // терминалом — одни задачи».
+  //
+  // The resolved value is `override ?? diskTitle` — the high-precedence tiers
+  // of titleFor (manual rename, then the live disk/alias title fed by App.tsx's
+  // sessions effect). We deliberately STOP there and let the overlay fall back
+  // to the disk row's OWN `s.title` (see below), NOT to the chat's base
+  // `chat.title`. titleFor's final tier is `chat.title`, which can be a stale
+  // pre-load string; for a row that already has an authoritative on-disk title
+  // we must prefer `s.title`. In production diskTitle === s.title (App.tsx pins
+  // them), so this equals titleFor exactly; it only differs in the gap before
+  // the sync runs — where `s.title` is the correct, non-stale choice.
   const tileTitleById = new Map<string, string>();
   // sessionId → ISO datetime the chat tile was opened. Overlaid onto the
   // matching disk session's date so OPENING a chat bumps it to the top
@@ -181,10 +184,13 @@ function sessionsWithOpenChats(): SessionItem[] {
     }
 
     if (known.has(c.sessionId)) {
-      // The disk row for an open chat must render through titleFor — the
-      // exact resolver the tile uses — so the two are identical by
-      // construction (not just when _diskTitles happens to equal s.title).
-      tileTitleById.set(c.sessionId, titleFor(c));
+      // Overlay only the high-precedence tiers (override ?? live disk title)
+      // onto the matching disk row; when neither is set, leave it unset so the
+      // overlay below keeps the row's own authoritative `s.title` rather than
+      // the chat's possibly-stale base title (what titleFor would fall back
+      // to). This is the resolver the tile uses for all realistic states.
+      const resolved = titleOverrideFor(c.id) ?? diskTitleFor(c.id);
+      if (resolved !== undefined) tileTitleById.set(c.sessionId, resolved);
       openedAtById.set(c.sessionId, openedAt);
       continue;
     }

@@ -172,6 +172,20 @@ export function titleOverrideFor(chatId: string): string | undefined {
 }
 
 /**
+ * Returns ONLY the live disk/session title fed via setDiskTitleForChat
+ * (App.tsx's sessions effect), or undefined when none has been synced yet.
+ * Reactive. Used by the History overlay to resolve `override ?? diskTitle ??
+ * <the disk row's own title>` — i.e. the same precedence titleFor uses, but
+ * with the disk ROW title (not the chat's possibly-stale base title) as the
+ * final fallback. That keeps an open chat's row equal to its tile header
+ * (parity) while never letting a stale `chat.title` shadow the authoritative
+ * on-disk title.
+ */
+export function diskTitleFor(chatId: string): string | undefined {
+  return _diskTitles().get(chatId);
+}
+
+/**
  * Lightweight test/debug hook so Playwright e2e (and DevTools manual
  * pokes) can reach the store without going through the UI. The
  * surface is intentionally tiny and read/write-symmetric; it's not
